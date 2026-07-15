@@ -1,6 +1,10 @@
 from django.urls import path
 
-from .views import TestCaseExecuteView,TestExecutionListView
+from .views import (
+    TestCaseExecuteView,
+    TestExecutionDetailView,
+    TestExecutionListView,
+)
 
 
 urlpatterns = [
@@ -13,5 +17,10 @@ urlpatterns = [
         'projects/<int:project_id>/executions/',
         TestExecutionListView.as_view(),
         name='test-execution-list',
+    ),
+    path(
+        'projects/<int:project_id>/executions/<int:pk>/',
+        TestExecutionDetailView.as_view(),
+        name='test-execution-detail',
     ),
 ]

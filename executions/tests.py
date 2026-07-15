@@ -162,6 +162,15 @@ class TestExecutionAPITests(APITestCase):
             },
         )
 
+    def get_execution_detail_url(self, project, execution):
+        return reverse(
+            'test-execution-detail',
+            kwargs={
+                'project_id': project.id,
+                'pk': execution.id,
+            },
+        )
+
     @patch('executions.services.requests.request')
     def test_member_can_execute_with_replaced_variables(self, mock_request):
         mock_response = Mock()
@@ -457,6 +466,10 @@ class TestExecutionAPITests(APITestCase):
         execution_ids = [item['id'] for item in response.data]
         self.assertIn(current_execution.id, execution_ids)
         self.assertEqual(len(response.data), 1)
+        self.assertNotIn('request_headers', response.data[0])
+        self.assertNotIn('request_body', response.data[0])
+        self.assertNotIn('response_headers', response.data[0])
+        self.assertNotIn('response_body', response.data[0])
 
     def test_viewer_can_list_executions(self):
         execution = ApiTestExecution.objects.create(
@@ -475,3 +488,52 @@ class TestExecutionAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], execution.id)
+
+    def test_viewer_can_view_execution_detail(self):
+        execution = ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            environment=self.environment,
+            status=ApiTestExecution.Status.FAILED,
+            request_method='GET',
+            request_url='http://test.example.com/api/users/18/',
+            request_headers={'Authorization': 'Bearer ***'},
+            request_query_params={'page': 1},
+            response_status_code=200,
+            response_body={'code': 1},
+            failure_message='JSON 字段断言失败',
+            executed_by=self.owner,
+        )
+        self.auth_as_viewer()
+
+        response = self.client.get(
+            self.get_execution_detail_url(self.project, execution)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], execution.id)
+        self.assertEqual(response.data['request_method'], 'GET')
+        self.assertEqual(
+            response.data['request_headers']['Authorization'],
+            'Bearer ***',
+        )
+        self.assertEqual(response.data['response_body'], {'code': 1})
+        self.assertEqual(
+            response.data['failure_message'],
+            'JSON 字段断言失败',
+        )
+
+    def test_execution_detail_cannot_cross_projects(self):
+        other_execution = ApiTestExecution.objects.create(
+            project=self.other_project,
+            test_case=self.other_test_case,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response = self.client.get(
+            self.get_execution_detail_url(self.project, other_execution)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

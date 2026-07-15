@@ -7,8 +7,7 @@ from rest_framework.views import APIView
 from projects.models import Project
 from projects.permissions import can_edit_project_resource
 from testcases.models import TestCase
-from .models import TestExecution
-from .serializers import TestExecutionSerializer
+from .serializers import TestExecutionListSerializer, TestExecutionSerializer
 from .services import execute_test_case
 
 class TestCaseExecuteView(APIView):
@@ -69,8 +68,13 @@ class TestExecutionListView(APIView):
     def get(self,request,project_id):
         project=self.get_project(request,project_id)
 
-        executions=project.test_executions.all()
-        serializer=TestExecutionSerializer(
+        executions=project.test_executions.select_related(
+            'project',
+            'test_case',
+            'environment',
+            'executed_by',
+        )
+        serializer=TestExecutionListSerializer(
             executions,
             many=True,
             context={'request':request}
@@ -79,3 +83,33 @@ class TestExecutionListView(APIView):
         return Response(
             serializer.data
         )
+
+
+class TestExecutionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_project(self,request,project_id):
+        return get_object_or_404(
+            Project,
+            id=project_id,
+            memberships__user=request.user,
+            is_archived=False,
+        )
+
+    def get(self,request,project_id,pk):
+        project=self.get_project(request,project_id)
+        execution=get_object_or_404(
+            project.test_executions.select_related(
+                'project',
+                'test_case',
+                'environment',
+                'executed_by',
+            ),
+            pk=pk,
+        )
+        serializer=TestExecutionSerializer(
+            execution,
+            context={'request':request},
+        )
+
+        return Response(serializer.data)
