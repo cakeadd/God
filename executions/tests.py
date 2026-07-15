@@ -416,8 +416,63 @@ class TestExecutionAPITests(APITestCase):
         self.assertEqual(response.data['status'], ApiTestExecution.Status.ERROR)
         self.assertEqual(
             response.data['error_message'],
-            '测试用例没有可用的运行环境或 base_url',
+            '测试用例未绑定环境，项目也没有可用的默认环境',
         )
+
+    @patch('executions.services.requests.request')
+    def test_execution_without_bound_environment_uses_default(self, mock_request):
+        self.environment.is_default = True
+        self.environment.save(update_fields=['is_default'])
+        test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            name='Use default environment case',
+            expected_status_code=200,
+            created_by=self.owner,
+        )
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.json.return_value = {'message': 'ok'}
+        mock_request.return_value = mock_response
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_execute_url(self.project, test_case),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], ApiTestExecution.Status.PASSED)
+        self.assertEqual(response.data['environment'], self.environment.id)
+        mock_request.assert_called_once()
+
+    @patch('executions.services.requests.request')
+    def test_inactive_bound_environment_does_not_use_default(self, mock_request):
+        self.environment.is_active = False
+        self.environment.save(update_fields=['is_active'])
+        default_environment = Environment.objects.create(
+            project=self.project,
+            name='Fallback Default',
+            base_url='http://default.example.com',
+            is_default=True,
+        )
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_execute_url(self.project, self.test_case),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], ApiTestExecution.Status.ERROR)
+        self.assertEqual(response.data['environment'], self.environment.id)
+        self.assertEqual(
+            response.data['error_message'],
+            '测试用例绑定的环境已停用',
+        )
+        self.assertNotEqual(response.data['environment'], default_environment.id)
+        mock_request.assert_not_called()
 
     def test_viewer_cannot_execute_testcase(self):
         self.auth_as_viewer()

@@ -7,6 +7,12 @@ from rest_framework.views import APIView
 from projects.permissions import can_edit_project_resource
 from projects.models import Project
 from .serializers import EnvironmentSerializer
+from .services import (
+    DefaultEnvironmentError,
+    create_environment,
+    deactivate_environment,
+    update_environment,
+)
 
 class EnvironmentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -47,7 +53,7 @@ class EnvironmentListCreateView(APIView):
 
         serializer.is_valid(raise_exception=True)
 
-        environment=serializer.save(project=project)
+        environment=create_environment(serializer,project)
         output_serializer=EnvironmentSerializer(
             environment,
             context={'request':request}
@@ -99,7 +105,13 @@ class EnvironmentDetailView(APIView):
             context={'request':request}
         )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            update_environment(serializer,environment)
+        except DefaultEnvironmentError as exc:
+            return Response(
+                {'detail':str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(serializer.data)
 
@@ -112,7 +124,12 @@ class EnvironmentDetailView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        environment.is_active=False
-        environment.save(update_fields=['is_active','updated_at'])
+        try:
+            deactivate_environment(environment)
+        except DefaultEnvironmentError as exc:
+            return Response(
+                {'detail':str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)

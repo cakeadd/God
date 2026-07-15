@@ -146,6 +146,116 @@ class EnvironmentAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_first_environment_becomes_default_automatically(self):
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.environment_list_url(self.project),
+            {
+                'name': 'First Env',
+                'base_url': 'http://first.example.com',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['is_default'])
+
+    def test_creating_new_default_unsets_old_default(self):
+        old_default = Environment.objects.create(
+            project=self.project,
+            name='Old Default',
+            base_url='http://old.example.com',
+            is_default=True,
+        )
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.environment_list_url(self.project),
+            {
+                'name': 'New Default',
+                'base_url': 'http://new.example.com',
+                'is_default': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['is_default'])
+        old_default.refresh_from_db()
+        self.assertFalse(old_default.is_default)
+
+    def test_setting_another_environment_as_default_unsets_old_default(self):
+        old_default = Environment.objects.create(
+            project=self.project,
+            name='Old Default',
+            base_url='http://old.example.com',
+            is_default=True,
+        )
+        new_default = Environment.objects.create(
+            project=self.project,
+            name='New Default',
+            base_url='http://new.example.com',
+        )
+        self.auth_as_member()
+
+        response = self.client.patch(
+            self.environment_detail_url(self.project, new_default),
+            {'is_default': True},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_default'])
+        old_default.refresh_from_db()
+        self.assertFalse(old_default.is_default)
+
+    def test_cannot_unset_default_while_other_environment_is_active(self):
+        default_environment = Environment.objects.create(
+            project=self.project,
+            name='Default Env',
+            base_url='http://default.example.com',
+            is_default=True,
+        )
+        Environment.objects.create(
+            project=self.project,
+            name='Other Env',
+            base_url='http://other.example.com',
+        )
+        self.auth_as_member()
+
+        response = self.client.patch(
+            self.environment_detail_url(self.project, default_environment),
+            {'is_default': False},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        default_environment.refresh_from_db()
+        self.assertTrue(default_environment.is_default)
+
+    def test_cannot_delete_default_while_other_environment_is_active(self):
+        default_environment = Environment.objects.create(
+            project=self.project,
+            name='Default Env',
+            base_url='http://default.example.com',
+            is_default=True,
+        )
+        Environment.objects.create(
+            project=self.project,
+            name='Other Env',
+            base_url='http://other.example.com',
+        )
+        self.auth_as_member()
+
+        response = self.client.delete(
+            self.environment_detail_url(self.project, default_environment)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        default_environment.refresh_from_db()
+        self.assertTrue(default_environment.is_active)
+
     def test_list_only_returns_active_environments_in_project(self):
         active_environment = Environment.objects.create(
             project=self.project,
@@ -216,6 +326,7 @@ class EnvironmentAPITests(APITestCase):
             project=self.project,
             name='Env To Delete',
             base_url='http://delete.example.com',
+            is_default=True,
         )
 
         self.auth_as_member()

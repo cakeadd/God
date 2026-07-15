@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 
 from projects.models import Project
 
@@ -24,6 +25,13 @@ class Environment(models.Model):
         verbose_name_plural='环境'
         ordering=['-created_at']
         unique_together=['project','name']
+        constraints=[
+            models.UniqueConstraint(
+                fields=['project'],
+                condition=Q(is_default=True, is_active=True),
+                name='unique_active_default_environment',
+            ),
+        ]
 
     def __str__(self):
         return  f"{self.project.name} - {self.name}"

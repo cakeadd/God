@@ -5,6 +5,7 @@ import json
 import requests
 from django.utils import timezone
 
+from environments.models import Environment
 from .models import TestExecution
 
 VARIABLE_PATTERN = re.compile(r'{{\s*([^{}\s]+)\s*}}')
@@ -24,6 +25,10 @@ class VariableSubstitutionError(ValueError):
 
 
 class JsonFieldLookupError(ValueError):
+    pass
+
+
+class EnvironmentResolutionError(ValueError):
     pass
 
 
@@ -154,12 +159,36 @@ def evaluate_legacy_status_code_assertions(response_status_code, assertions):
     return failure_messages
 
 
-def create_variable_error_execution(test_case, user, error_message):
+def resolve_execution_environment(test_case):
+    if test_case.environment_id is not None:
+        if not test_case.environment.is_active:
+            raise EnvironmentResolutionError('测试用例绑定的环境已停用')
+        return test_case.environment
+
+    environment = Environment.objects.filter(
+        project=test_case.project,
+        is_active=True,
+        is_default=True,
+    ).first()
+    if environment is None:
+        raise EnvironmentResolutionError(
+            '测试用例未绑定环境，项目也没有可用的默认环境'
+        )
+
+    return environment
+
+
+def create_error_execution(
+    test_case,
+    user,
+    error_message,
+    environment=None,
+):
     now = timezone.now()
     return TestExecution.objects.create(
         project=test_case.project,
         test_case=test_case,
-        environment=test_case.environment,
+        environment=environment,
         status=TestExecution.Status.ERROR,
         request_method=test_case.endpoint.method,
         error_message=error_message,
@@ -171,7 +200,17 @@ def create_variable_error_execution(test_case, user, error_message):
 
 def execute_test_case(test_case,user):
     endpoint=test_case.endpoint
-    environment=test_case.environment
+
+    try:
+        environment=resolve_execution_environment(test_case)
+    except EnvironmentResolutionError as exc:
+        return create_error_execution(
+            test_case,
+            user,
+            str(exc),
+            environment=test_case.environment,
+        )
+
     variables=environment.variables if environment else {}
 
     request_method=endpoint.method
@@ -192,10 +231,11 @@ def execute_test_case(test_case,user):
             variables,
         )
     except VariableSubstitutionError as exc:
-        return create_variable_error_execution(
+        return create_error_execution(
             test_case,
             user,
             str(exc),
+            environment=environment,
         )
 
     execution=TestExecution.objects.create(
