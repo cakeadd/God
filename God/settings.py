@@ -144,3 +144,18 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': '基于 Django REST Framework 的后端接口文档',
     'VERSION': '0.1.0',
 }
+
+# Celery 只传递 JSON 数据；Redis 的 0 号库作为消息队列，1 号库保存任务结果。
+CELERY_BROKER_URL = os.getenv(
+    'CELERY_BROKER_URL',
+    'redis://127.0.0.1:6379/0',
+)
+CELERY_RESULT_BACKEND = os.getenv(
+    'CELERY_RESULT_BACKEND',
+    'redis://127.0.0.1:6379/1',
+)
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True

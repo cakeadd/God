@@ -10,7 +10,8 @@ from interfaces.models import ApiEndpoint
 from projects.models import Project, ProjectMember
 from testcases.models import TestCase as ApiTestCase
 from users.models import User
-from .models import TestExecution as ApiTestExecution
+from .models import TestExecution as ApiTestExecution, TestRun as ApiTestRun
+from .run_services import execute_test_run
 
 
 class TestExecutionAPITests(APITestCase):
@@ -168,6 +169,21 @@ class TestExecutionAPITests(APITestCase):
             kwargs={
                 'project_id': project.id,
                 'pk': execution.id,
+            },
+        )
+
+    def get_test_run_list_url(self, project):
+        return reverse(
+            'test-run-list-create',
+            kwargs={'project_id': project.id},
+        )
+
+    def get_test_run_detail_url(self, project, test_run):
+        return reverse(
+            'test-run-detail',
+            kwargs={
+                'project_id': project.id,
+                'pk': test_run.id,
             },
         )
 
@@ -592,3 +608,165 @@ class TestExecutionAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_member_can_create_async_test_run(self, mock_delay):
+        second_test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Second batch case',
+            expected_status_code=200,
+            created_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_list_url(self.project),
+            {
+                'name': 'Smoke Test',
+                'test_case_ids': [self.test_case.id, second_test_case.id],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data['status'], ApiTestRun.Status.PENDING)
+        self.assertEqual(response.data['total_count'], 2)
+        test_run = ApiTestRun.objects.get(pk=response.data['id'])
+        self.assertEqual(
+            set(test_run.test_cases.values_list('id',flat=True)),
+            {self.test_case.id, second_test_case.id},
+        )
+        mock_delay.assert_called_once_with(test_run.id)
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_viewer_cannot_create_test_run(self, mock_delay):
+        self.auth_as_viewer()
+
+        response = self.client.post(
+            self.get_test_run_list_url(self.project),
+            {'test_case_ids': [self.test_case.id]},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(ApiTestRun.objects.count(), 0)
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_test_run_rejects_duplicate_case_ids(self, mock_delay):
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_list_url(self.project),
+            {
+                'test_case_ids': [self.test_case.id, self.test_case.id],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('test_case_ids', response.data)
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_test_run_rejects_case_from_other_project(self, mock_delay):
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_list_url(self.project),
+            {'test_case_ids': [self.other_test_case.id]},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data['invalid_test_case_ids'],
+            [self.other_test_case.id],
+        )
+        mock_delay.assert_not_called()
+
+    def test_viewer_can_view_test_run_detail(self):
+        test_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Regression',
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            completed_count=1,
+            passed_count=1,
+            executed_by=self.owner,
+        )
+        test_run.test_cases.set([self.test_case])
+        ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            environment=self.environment,
+            test_run=test_run,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.owner,
+        )
+        self.auth_as_viewer()
+
+        response = self.client.get(
+            self.get_test_run_detail_url(self.project, test_run)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], test_run.id)
+        self.assertEqual(response.data['test_cases'][0]['id'], self.test_case.id)
+        self.assertEqual(response.data['executions'][0]['test_run'], test_run.id)
+
+    def test_test_run_detail_cannot_cross_projects(self):
+        test_run = ApiTestRun.objects.create(
+            project=self.other_project,
+            total_count=1,
+            executed_by=self.owner,
+        )
+        test_run.test_cases.set([self.other_test_case])
+        self.auth_as_member()
+
+        response = self.client.get(
+            self.get_test_run_detail_url(self.project, test_run)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @patch('executions.services.requests.request')
+    def test_execute_test_run_updates_counts_and_is_idempotent(self, mock_request):
+        failed_test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Expected 201 case',
+            expected_status_code=201,
+            created_by=self.owner,
+        )
+        test_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Count Test',
+            total_count=2,
+            executed_by=self.member,
+        )
+        test_run.test_cases.set([self.test_case, failed_test_case])
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.json.return_value = {'message': 'ok'}
+        mock_request.return_value = mock_response
+
+        execute_test_run(test_run.id)
+
+        test_run.refresh_from_db()
+        self.assertEqual(test_run.status, ApiTestRun.Status.COMPLETED)
+        self.assertEqual(test_run.completed_count, 2)
+        self.assertEqual(test_run.passed_count, 1)
+        self.assertEqual(test_run.failed_count, 1)
+        self.assertEqual(test_run.error_count, 0)
+        self.assertEqual(test_run.executions.count(), 2)
+        self.assertEqual(mock_request.call_count, 2)
+
+        # 重复消费同一个任务不会再次发送 HTTP 请求或创建执行记录。
+        execute_test_run(test_run.id)
+        self.assertEqual(test_run.executions.count(), 2)
+        self.assertEqual(mock_request.call_count, 2)

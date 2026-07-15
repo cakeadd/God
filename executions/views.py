@@ -1,4 +1,7 @@
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from kombu.exceptions import OperationalError as BrokerOperationalError
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -7,8 +10,17 @@ from rest_framework.views import APIView
 from projects.models import Project
 from projects.permissions import can_edit_project_resource
 from testcases.models import TestCase
-from .serializers import TestExecutionListSerializer, TestExecutionSerializer
+from .models import TestExecution, TestRun
+from .run_services import create_test_run
+from .serializers import (
+    TestExecutionListSerializer,
+    TestExecutionSerializer,
+    TestRunCreateSerializer,
+    TestRunDetailSerializer,
+    TestRunListSerializer,
+)
 from .services import execute_test_case
+from .tasks import execute_test_run_task
 
 class TestCaseExecuteView(APIView):
     permission_classes = [IsAuthenticated]
@@ -112,4 +124,131 @@ class TestExecutionDetailView(APIView):
             context={'request':request},
         )
 
+        return Response(serializer.data)
+
+
+class TestRunListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_project(self,request,project_id):
+        return get_object_or_404(
+            Project,
+            id=project_id,
+            memberships__user=request.user,
+            is_archived=False,
+        )
+
+    def get(self,request,project_id):
+        project=self.get_project(request,project_id)
+        test_runs=project.test_runs.select_related(
+            'project',
+            'executed_by',
+        )
+        serializer=TestRunListSerializer(
+            test_runs,
+            many=True,
+            context={'request':request},
+        )
+        return Response(serializer.data)
+
+    def post(self,request,project_id):
+        project=self.get_project(request,project_id)
+        if not can_edit_project_resource(project,request.user):
+            return Response(
+                {'detail':'你没有权限发起批量执行'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        input_serializer=TestRunCreateSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        test_case_ids=input_serializer.validated_data['test_case_ids']
+        test_cases=list(
+            project.test_cases.filter(
+                id__in=test_case_ids,
+                is_active=True,
+            )
+        )
+        found_ids={test_case.id for test_case in test_cases}
+        invalid_ids=[
+            test_case_id
+            for test_case_id in test_case_ids
+            if test_case_id not in found_ids
+        ]
+        if invalid_ids:
+            return Response(
+                {
+                    'detail':'部分测试用例不属于当前项目或已停用',
+                    'invalid_test_case_ids':invalid_ids,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        test_run=create_test_run(
+            project=project,
+            user=request.user,
+            test_cases=test_cases,
+            name=input_serializer.validated_data['name'],
+        )
+
+        try:
+            # 批次提交数据库后再发送 ID，Worker 才能稳定读取到记录。
+            execute_test_run_task.delay(test_run.id)
+        except BrokerOperationalError:
+            test_run.status=TestRun.Status.ERROR
+            test_run.error_message='任务提交失败，请检查 Redis 服务'
+            test_run.finished_at=timezone.now()
+            test_run.save(update_fields=[
+                'status',
+                'error_message',
+                'finished_at',
+            ])
+            serializer=TestRunListSerializer(test_run)
+            return Response(
+                serializer.data,
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        serializer=TestRunListSerializer(
+            test_run,
+            context={'request':request},
+        )
+        return Response(
+            serializer.data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class TestRunDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_project(self,request,project_id):
+        return get_object_or_404(
+            Project,
+            id=project_id,
+            memberships__user=request.user,
+            is_archived=False,
+        )
+
+    def get(self,request,project_id,pk):
+        project=self.get_project(request,project_id)
+        execution_queryset=TestExecution.objects.select_related(
+            'project',
+            'test_case',
+            'environment',
+            'executed_by',
+        )
+        test_run=get_object_or_404(
+            project.test_runs.select_related(
+                'project',
+                'executed_by',
+            ).prefetch_related(
+                'test_cases',
+                Prefetch('executions',queryset=execution_queryset),
+            ),
+            pk=pk,
+        )
+        serializer=TestRunDetailSerializer(
+            test_run,
+            context={'request':request},
+        )
         return Response(serializer.data)

@@ -183,12 +183,14 @@ def create_error_execution(
     user,
     error_message,
     environment=None,
+    test_run=None,
 ):
     now = timezone.now()
     return TestExecution.objects.create(
         project=test_case.project,
         test_case=test_case,
         environment=environment,
+        test_run=test_run,
         status=TestExecution.Status.ERROR,
         request_method=test_case.endpoint.method,
         error_message=error_message,
@@ -198,7 +200,7 @@ def create_error_execution(
     )
 
 
-def execute_test_case(test_case,user):
+def execute_test_case(test_case,user,test_run=None):
     endpoint=test_case.endpoint
 
     try:
@@ -209,6 +211,7 @@ def execute_test_case(test_case,user):
             user,
             str(exc),
             environment=test_case.environment,
+            test_run=test_run,
         )
 
     variables=environment.variables if environment else {}
@@ -236,12 +239,14 @@ def execute_test_case(test_case,user):
             user,
             str(exc),
             environment=environment,
+            test_run=test_run,
         )
 
     execution=TestExecution.objects.create(
         project=test_case.project,
         test_case=test_case,
         environment=environment,
+        test_run=test_run,
         status=TestExecution.Status.RUNNING,
         request_method=request_method,
         request_url=request_url,
