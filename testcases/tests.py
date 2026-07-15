@@ -181,6 +181,30 @@ class TestCaseAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_create_rejects_invalid_assertion(self):
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_testcase_list_url(self.project),
+            {
+                'endpoint': self.endpoint.id,
+                'environment': self.environment.id,
+                'name': 'Invalid assertion case',
+                'expected_status_code': 200,
+                'assertions': [
+                    {
+                        'type': 'json_field_contains',
+                        'path': 'data.id',
+                        'expected': 1,
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('assertions', response.data)
+
     def test_list_only_returns_active_testcases_in_project(self):
         active_case = ApiTestCase.objects.create(
             project=self.project,

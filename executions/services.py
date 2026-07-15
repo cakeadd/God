@@ -1,5 +1,6 @@
 import time
 import re
+import json
 
 import requests
 from django.utils import timezone
@@ -19,6 +20,10 @@ SENSITIVE_HEADER_NAMES = {
 
 
 class VariableSubstitutionError(ValueError):
+    pass
+
+
+class JsonFieldLookupError(ValueError):
     pass
 
 
@@ -82,6 +87,71 @@ def build_request_url(environment, path):
         raise VariableSubstitutionError('接口路径替换后必须是字符串')
 
     return f"{environment.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def get_json_field_value(data, path):
+    current_value = data
+
+    for segment in path.split('.'):
+        if isinstance(current_value, dict):
+            if segment not in current_value:
+                raise JsonFieldLookupError(f'字段 {segment} 不存在')
+            current_value = current_value[segment]
+        elif isinstance(current_value, list):
+            if not segment.isdigit():
+                raise JsonFieldLookupError(f'{segment} 不是有效的数组下标')
+
+            index = int(segment)
+            if index >= len(current_value):
+                raise JsonFieldLookupError(f'数组下标 {index} 超出范围')
+            current_value = current_value[index]
+        else:
+            raise JsonFieldLookupError(
+                f'无法从 {segment} 之前的值继续读取字段'
+            )
+
+    return current_value
+
+
+def evaluate_json_assertions(response_body, assertions):
+    failure_messages = []
+
+    for assertion in assertions:
+        path = assertion['path']
+        expected = assertion['expected']
+
+        try:
+            actual = get_json_field_value(response_body, path)
+        except JsonFieldLookupError as exc:
+            failure_messages.append(
+                f'JSON 字段断言失败：{path}，{exc}'
+            )
+            continue
+
+        if actual != expected:
+            failure_messages.append(
+                'JSON 字段断言失败：'
+                f'{path} 期望 {json.dumps(expected, ensure_ascii=False)}，'
+                f'实际 {json.dumps(actual, ensure_ascii=False)}'
+            )
+
+    return failure_messages
+
+
+def evaluate_legacy_status_code_assertions(response_status_code, assertions):
+    failure_messages = []
+
+    for assertion in assertions:
+        if assertion['type'] != 'status_code':
+            continue
+
+        if response_status_code != assertion['expected']:
+            failure_messages.append(
+                f'状态码断言失败：期望 {assertion["expected"]}，'
+                f'实际 {response_status_code}'
+            )
+
+    return failure_messages
 
 
 def create_variable_error_execution(test_case, user, error_message):
@@ -166,9 +236,11 @@ def execute_test_case(test_case,user):
         )
         duration_ms=int((time.perf_counter()-start_time)*1000)
 
+        response_is_json = True
         try:
             response_body=response.json()
         except ValueError:
+            response_is_json = False
             response_body={
                 'text': response.text,
             }
@@ -179,10 +251,42 @@ def execute_test_case(test_case,user):
         execution.duration_ms=duration_ms
         execution.finished_at=timezone.now()
 
-        if response.status_code==test_case.expected_status_code:
-            execution.status=TestExecution.Status.PASSED
-        else:
+        failure_messages = []
+        if response.status_code != test_case.expected_status_code:
+            failure_messages.append(
+                f'状态码断言失败：期望 {test_case.expected_status_code}，'
+                f'实际 {response.status_code}'
+            )
+
+        if test_case.assertions:
+            failure_messages.extend(
+                evaluate_legacy_status_code_assertions(
+                    response.status_code,
+                    test_case.assertions,
+                )
+            )
+            json_assertions = [
+                assertion
+                for assertion in test_case.assertions
+                if assertion['type'] == 'json_field_equals'
+            ]
+            if json_assertions and response_is_json:
+                failure_messages.extend(
+                    evaluate_json_assertions(
+                        response_body,
+                        json_assertions,
+                    )
+                )
+            elif json_assertions:
+                failure_messages.append('JSON 字段断言失败：响应不是有效 JSON')
+
+        failure_messages = list(dict.fromkeys(failure_messages))
+
+        if failure_messages:
             execution.status=TestExecution.Status.FAILED
+            execution.failure_message='\n'.join(failure_messages)
+        else:
+            execution.status=TestExecution.Status.PASSED
 
         execution.save(
             update_fields=[
@@ -191,6 +295,7 @@ def execute_test_case(test_case,user):
                 'response_headers',
                 'response_body',
                 'duration_ms',
+                'failure_message',
                 'finished_at',
             ]
         )

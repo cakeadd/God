@@ -258,6 +258,114 @@ class TestExecutionAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['status'], ApiTestExecution.Status.FAILED)
         self.assertEqual(response.data['response_status_code'], 500)
+        self.assertEqual(
+            response.data['failure_message'],
+            '状态码断言失败：期望 200，实际 500',
+        )
+
+    @patch('executions.services.requests.request')
+    def test_json_field_assertions_pass(self, mock_request):
+        self.test_case.assertions = [
+            {
+                'type': 'json_field_equals',
+                'path': 'data.items.0.id',
+                'expected': 18,
+            },
+            {
+                'type': 'json_field_equals',
+                'path': 'success',
+                'expected': True,
+            },
+        ]
+        self.test_case.save(update_fields=['assertions'])
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.json.return_value = {
+            'success': True,
+            'data': {'items': [{'id': 18}]},
+        }
+        mock_request.return_value = mock_response
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_execute_url(self.project, self.test_case),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], ApiTestExecution.Status.PASSED)
+        self.assertEqual(response.data['failure_message'], '')
+
+    @patch('executions.services.requests.request')
+    def test_json_field_assertions_save_all_failure_reasons(self, mock_request):
+        self.test_case.assertions = [
+            {
+                'type': 'json_field_equals',
+                'path': 'data.user.id',
+                'expected': 18,
+            },
+            {
+                'type': 'json_field_equals',
+                'path': 'data.user.name',
+                'expected': 'Alice',
+            },
+        ]
+        self.test_case.save(update_fields=['assertions'])
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.json.return_value = {
+            'data': {'user': {'id': 19}},
+        }
+        mock_request.return_value = mock_response
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_execute_url(self.project, self.test_case),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], ApiTestExecution.Status.FAILED)
+        self.assertIn(
+            'data.user.id 期望 18，实际 19',
+            response.data['failure_message'],
+        )
+        self.assertIn(
+            'data.user.name，字段 name 不存在',
+            response.data['failure_message'],
+        )
+
+    @patch('executions.services.requests.request')
+    def test_non_json_response_fails_json_assertion(self, mock_request):
+        self.test_case.assertions = [
+            {
+                'type': 'json_field_equals',
+                'path': 'code',
+                'expected': 0,
+            },
+        ]
+        self.test_case.save(update_fields=['assertions'])
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/html'}
+        mock_response.json.side_effect = ValueError
+        mock_response.text = '<html>error</html>'
+        mock_request.return_value = mock_response
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_execute_url(self.project, self.test_case),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], ApiTestExecution.Status.FAILED)
+        self.assertEqual(
+            response.data['failure_message'],
+            'JSON 字段断言失败：响应不是有效 JSON',
+        )
 
     @patch('executions.services.requests.request')
     def test_request_exception_marks_execution_error(self, mock_request):

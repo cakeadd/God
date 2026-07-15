@@ -49,3 +49,42 @@ class TestCaseSerializer(serializers.ModelSerializer):
             return None
 
         return obj.environment.name
+
+    def validate_assertions(self, assertions):
+        if not isinstance(assertions, list):
+            raise serializers.ValidationError('断言规则必须是列表')
+
+        for index, assertion in enumerate(assertions):
+            if not isinstance(assertion, dict):
+                raise serializers.ValidationError(
+                    f'第 {index + 1} 条断言必须是对象'
+                )
+
+            assertion_type = assertion.get('type')
+            if assertion_type == 'status_code':
+                if 'expected' not in assertion:
+                    raise serializers.ValidationError(
+                        f'第 {index + 1} 条断言缺少 expected'
+                    )
+                continue
+
+            if assertion_type != 'json_field_equals':
+                raise serializers.ValidationError(
+                    f'第 {index + 1} 条断言类型只支持 '
+                    'status_code 或 json_field_equals'
+                )
+
+            path = assertion.get('path')
+            if not isinstance(path, str) or not path or any(
+                not segment for segment in path.split('.')
+            ):
+                raise serializers.ValidationError(
+                    f'第 {index + 1} 条断言的 path 必须是有效的点号路径'
+                )
+
+            if 'expected' not in assertion:
+                raise serializers.ValidationError(
+                    f'第 {index + 1} 条断言缺少 expected'
+                )
+
+        return assertions

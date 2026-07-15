@@ -60,6 +60,7 @@ class TestExecution(models.Model):
         null=True,
         blank=True,
     )
+    failure_message=models.TextField('断言失败原因',blank=True)
     error_message=models.TextField('错误信息',blank=True)
 
     executed_by=models.ForeignKey(
