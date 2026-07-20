@@ -187,6 +187,15 @@ class TestExecutionAPITests(APITestCase):
             },
         )
 
+    def get_test_run_report_url(self, project, test_run):
+        return reverse(
+            'test-run-report',
+            kwargs={
+                'project_id': project.id,
+                'pk': test_run.id,
+            },
+        )
+
     @patch('executions.services.requests.request')
     def test_member_can_execute_with_replaced_variables(self, mock_request):
         mock_response = Mock()
@@ -770,3 +779,143 @@ class TestExecutionAPITests(APITestCase):
         execute_test_run(test_run.id)
         self.assertEqual(test_run.executions.count(), 2)
         self.assertEqual(mock_request.call_count, 2)
+
+    def test_viewer_can_view_completed_test_run_report(self):
+        failed_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Failed report case',
+            expected_status_code=200,
+            created_by=self.owner,
+        )
+        error_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Error report case',
+            expected_status_code=200,
+            created_by=self.owner,
+        )
+        test_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Report Test',
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=3,
+            completed_count=3,
+            passed_count=1,
+            failed_count=1,
+            error_count=1,
+            duration_ms=800,
+            executed_by=self.owner,
+        )
+        test_run.test_cases.set([
+            self.test_case,
+            failed_case,
+            error_case,
+        ])
+        ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            environment=self.environment,
+            test_run=test_run,
+            status=ApiTestExecution.Status.PASSED,
+            duration_ms=100,
+            executed_by=self.owner,
+        )
+        failed_execution = ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=failed_case,
+            environment=self.environment,
+            test_run=test_run,
+            status=ApiTestExecution.Status.FAILED,
+            response_status_code=200,
+            duration_ms=300,
+            failure_message='code 期望 0，实际 1001',
+            executed_by=self.owner,
+        )
+        ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=error_case,
+            environment=self.environment,
+            test_run=test_run,
+            status=ApiTestExecution.Status.ERROR,
+            error_message='request timed out',
+            executed_by=self.owner,
+        )
+        self.auth_as_viewer()
+
+        response = self.client.get(
+            self.get_test_run_report_url(self.project, test_run)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['result'], 'failed')
+        self.assertEqual(response.data['completion_rate'], 100.0)
+        self.assertEqual(response.data['pass_rate'], 33.33)
+        self.assertEqual(response.data['failure_rate'], 33.33)
+        self.assertEqual(response.data['error_rate'], 33.33)
+        self.assertEqual(response.data['total_duration_ms'], 800)
+        self.assertEqual(response.data['average_duration_ms'], 200.0)
+        self.assertEqual(response.data['max_duration_ms'], 300)
+        self.assertEqual(
+            response.data['slowest_executions'][0]['execution_id'],
+            failed_execution.id,
+        )
+        self.assertEqual(len(response.data['problem_executions']), 2)
+        self.assertNotIn('request_body', response.data['problem_executions'][0])
+        self.assertNotIn('response_body', response.data['problem_executions'][0])
+
+    def test_running_report_uses_completed_count_for_rates(self):
+        test_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Running Report',
+            status=ApiTestRun.Status.RUNNING,
+            total_count=4,
+            completed_count=2,
+            passed_count=2,
+            executed_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response = self.client.get(
+            self.get_test_run_report_url(self.project, test_run)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['result'], 'incomplete')
+        self.assertEqual(response.data['completion_rate'], 50.0)
+        self.assertEqual(response.data['pass_rate'], 100.0)
+        self.assertEqual(response.data['failure_rate'], 0.0)
+
+    def test_completed_all_passed_report_result(self):
+        test_run = ApiTestRun.objects.create(
+            project=self.project,
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            completed_count=1,
+            passed_count=1,
+            executed_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response = self.client.get(
+            self.get_test_run_report_url(self.project, test_run)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['result'], 'passed')
+
+    def test_test_run_report_cannot_cross_projects(self):
+        test_run = ApiTestRun.objects.create(
+            project=self.other_project,
+            status=ApiTestRun.Status.COMPLETED,
+            executed_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response = self.client.get(
+            self.get_test_run_report_url(self.project, test_run)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

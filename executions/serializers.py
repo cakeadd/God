@@ -174,3 +174,35 @@ class TestRunDetailSerializer(TestRunListSerializer):
             }
             for test_case in obj.test_cases.all()
         ]
+
+
+class TestRunReportExecutionSerializer(serializers.Serializer):
+    execution_id=serializers.IntegerField()
+    test_case_id=serializers.IntegerField()
+    test_case_name=serializers.CharField()
+    status=serializers.CharField()
+    response_status_code=serializers.IntegerField(allow_null=True)
+    duration_ms=serializers.IntegerField(allow_null=True)
+    failure_message=serializers.CharField(allow_blank=True)
+    error_message=serializers.CharField(allow_blank=True)
+
+
+class TestRunReportSerializer(serializers.Serializer):
+    test_run_id=serializers.IntegerField()
+    name=serializers.CharField(allow_blank=True)
+    status=serializers.CharField()
+    result=serializers.CharField()
+    total_count=serializers.IntegerField()
+    completed_count=serializers.IntegerField()
+    passed_count=serializers.IntegerField()
+    failed_count=serializers.IntegerField()
+    error_count=serializers.IntegerField()
+    completion_rate=serializers.FloatField()
+    pass_rate=serializers.FloatField()
+    failure_rate=serializers.FloatField()
+    error_rate=serializers.FloatField()
+    total_duration_ms=serializers.IntegerField()
+    average_duration_ms=serializers.FloatField()
+    max_duration_ms=serializers.IntegerField()
+    slowest_executions=TestRunReportExecutionSerializer(many=True)
+    problem_executions=TestRunReportExecutionSerializer(many=True)

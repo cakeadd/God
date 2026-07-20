@@ -6,6 +6,7 @@ from .views import (
     TestExecutionListView,
     TestRunDetailView,
     TestRunListCreateView,
+    TestRunReportView,
 )
 
 
@@ -34,5 +35,10 @@ urlpatterns = [
         'projects/<int:project_id>/test-runs/<int:pk>/',
         TestRunDetailView.as_view(),
         name='test-run-detail',
+    ),
+    path(
+        'projects/<int:project_id>/test-runs/<int:pk>/report/',
+        TestRunReportView.as_view(),
+        name='test-run-report',
     ),
 ]

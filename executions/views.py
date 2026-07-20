@@ -11,6 +11,7 @@ from projects.models import Project
 from projects.permissions import can_edit_project_resource
 from testcases.models import TestCase
 from .models import TestExecution, TestRun
+from .report_services import build_test_run_report
 from .run_services import create_test_run
 from .serializers import (
     TestExecutionListSerializer,
@@ -18,6 +19,7 @@ from .serializers import (
     TestRunCreateSerializer,
     TestRunDetailSerializer,
     TestRunListSerializer,
+    TestRunReportSerializer,
 )
 from .services import execute_test_case
 from .tasks import execute_test_run_task
@@ -251,4 +253,31 @@ class TestRunDetailView(APIView):
             test_run,
             context={'request':request},
         )
+        return Response(serializer.data)
+
+
+class TestRunReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_project(self,request,project_id):
+        return get_object_or_404(
+            Project,
+            id=project_id,
+            memberships__user=request.user,
+            is_archived=False,
+        )
+
+    def get(self,request,project_id,pk):
+        project=self.get_project(request,project_id)
+        execution_queryset=TestExecution.objects.select_related(
+            'test_case',
+        )
+        test_run=get_object_or_404(
+            project.test_runs.prefetch_related(
+                Prefetch('executions',queryset=execution_queryset),
+            ),
+            pk=pk,
+        )
+        report=build_test_run_report(test_run)
+        serializer=TestRunReportSerializer(report)
         return Response(serializer.data)
