@@ -129,6 +129,38 @@ class ApiEndpointAPITests(APITestCase):
         self.assertEqual(response.data['project'], self.project.id)
         self.assertEqual(response.data['created_by'], self.member.id)
 
+    def test_create_rejects_non_object_request_configuration(self):
+        self.auth_as_member()
+
+        invalid_values = {
+            'headers': [],
+            'query_params': 'page=1',
+            'body': ['item'],
+        }
+
+        for field_name, invalid_value in invalid_values.items():
+            with self.subTest(field_name=field_name):
+                response = self.client.post(
+                    self.endpoint_list_url(self.project),
+                    {
+                        'name': f'Invalid {field_name}',
+                        'method': 'POST',
+                        'path': f'/api/invalid-{field_name}/',
+                        field_name: invalid_value,
+                    },
+                    format='json',
+                )
+
+                self.assertEqual(
+                    response.status_code,
+                    status.HTTP_400_BAD_REQUEST,
+                )
+                self.assertIn(field_name, response.data)
+                self.assertEqual(
+                    str(response.data[field_name][0]),
+                    '必须是 JSON 对象',
+                )
+
     def test_viewer_cannot_create_endpoint(self):
         self.auth_as_viewer()
 

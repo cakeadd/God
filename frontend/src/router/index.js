@@ -3,8 +3,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const AppLayout = () => import('../layouts/AppLayout.vue')
+const ProjectWorkspaceLayout = () => import('../layouts/ProjectWorkspaceLayout.vue')
 const LoginView = () => import('../views/LoginView.vue')
 const ProjectListView = () => import('../views/ProjectListView.vue')
+const EndpointListView = () => import('../views/EndpointListView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -25,6 +27,24 @@ const router = createRouter({
           path: 'projects',
           name: 'projects',
           component: ProjectListView,
+        },
+        {
+          path: 'projects/:projectId',
+          component: ProjectWorkspaceLayout,
+          children: [
+            {
+              path: '',
+              redirect: (to) => ({
+                name: 'project-endpoints',
+                params: { projectId: to.params.projectId },
+              }),
+            },
+            {
+              path: 'endpoints',
+              name: 'project-endpoints',
+              component: EndpointListView,
+            },
+          ],
         },
       ],
     },

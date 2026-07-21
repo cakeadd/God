@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { ArrowRight, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import { getProjects } from '../api/projects'
@@ -71,7 +71,11 @@ onMounted(loadProjects)
         <el-table-column label="项目" min-width="260">
           <template #default="{ row }">
             <div class="project-name-cell">
-              <strong>{{ row.name }}</strong>
+              <RouterLink
+                :to="{ name: 'project-endpoints', params: { projectId: row.id } }"
+              >
+                {{ row.name }}
+              </RouterLink>
               <span>{{ row.description || '暂无描述' }}</span>
             </div>
           </template>
@@ -84,6 +88,19 @@ onMounted(loadProjects)
         <el-table-column prop="owner_username" label="拥有者" width="150" />
         <el-table-column label="更新时间" width="190">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
+        </el-table-column>
+        <el-table-column label="进入" width="72" align="center">
+          <template #default="{ row }">
+            <el-tooltip content="进入项目" placement="left">
+              <el-button
+                :icon="ArrowRight"
+                circle
+                text
+                aria-label="进入项目"
+                @click="$router.push({ name: 'project-endpoints', params: { projectId: row.id } })"
+              />
+            </el-tooltip>
+          </template>
         </el-table-column>
       </el-table>
 
