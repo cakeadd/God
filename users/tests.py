@@ -66,3 +66,80 @@ class AuthAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['id'], user.id)
         self.assertEqual(response.data['username'], 'tester')
+
+    def test_me_patch_updates_only_editable_profile_fields(self):
+        user = User.objects.create_user(
+            username='tester',
+            password='testpass123',
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.patch(
+            reverse('user-me'),
+            {
+                'username': 'changed-username',
+                'nickname': 'Updated Tester',
+                'email': 'updated@example.com',
+                'phone': '13800138000',
+                'password': 'changed-password',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.username, 'tester')
+        self.assertEqual(user.nickname, 'Updated Tester')
+        self.assertEqual(user.email, 'updated@example.com')
+        self.assertEqual(user.phone, '13800138000')
+        self.assertTrue(user.check_password('testpass123'))
+        self.assertNotIn('password', response.data)
+
+    def test_me_patch_rejects_duplicate_phone(self):
+        User.objects.create_user(
+            username='existing',
+            password='testpass123',
+            phone='13800138000',
+        )
+        user = User.objects.create_user(
+            username='tester',
+            password='testpass123',
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.patch(
+            reverse('user-me'),
+            {'phone': '13800138000'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('phone', response.data)
+
+    def test_me_patch_converts_empty_phone_to_null(self):
+        user = User.objects.create_user(
+            username='tester',
+            password='testpass123',
+            phone='13800138000',
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.patch(
+            reverse('user-me'),
+            {'phone': ''},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertIsNone(user.phone)
+        self.assertIsNone(response.data['phone'])
+
+    def test_me_patch_requires_authentication(self):
+        response = self.client.patch(
+            reverse('user-me'),
+            {'nickname': 'Anonymous'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

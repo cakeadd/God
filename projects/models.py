@@ -27,7 +27,6 @@ class Project(models.Model):
 class ProjectMember(models.Model):
     class Role(models.TextChoices):
         OWNER='owner','拥有者'
-        ADMIN='admin','管理者'
         MEMBER='member','成员'
         VIEWER='viewer','只读成员'
 

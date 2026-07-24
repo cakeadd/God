@@ -224,6 +224,12 @@ input {
   line-height: 1.25;
 }
 
+.page-heading__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .data-surface {
   min-height: 260px;
   overflow: hidden;
@@ -241,6 +247,10 @@ input {
   width: 100%;
 }
 
+.project-table .el-table__row {
+  cursor: pointer;
+}
+
 .project-name-cell {
   min-width: 0;
   display: flex;
@@ -249,20 +259,13 @@ input {
   padding: 4px 0;
 }
 
-.project-name-cell a {
+.project-name-cell strong {
   overflow: hidden;
   color: #0c6159;
   font-size: 14px;
   font-weight: 700;
-  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-name-cell a:hover,
-.project-name-cell a:focus-visible {
-  color: var(--app-primary);
-  text-decoration: underline;
 }
 
 .project-name-cell span {
@@ -370,11 +373,13 @@ input {
   min-width: 0;
 }
 
-.endpoint-heading {
+.endpoint-heading,
+.member-heading {
   align-items: center;
 }
 
-.endpoint-heading h2 {
+.endpoint-heading h2,
+.member-heading h2 {
   margin: 0;
   color: var(--app-text);
   font-size: 20px;
@@ -382,7 +387,8 @@ input {
   letter-spacing: 0;
 }
 
-.endpoint-heading p {
+.endpoint-heading p,
+.member-heading p {
   margin: 6px 0 0;
   color: var(--app-muted);
   font-size: 13px;
@@ -397,6 +403,46 @@ input {
 
 .endpoint-surface {
   min-height: 320px;
+}
+
+.member-surface {
+  min-height: 320px;
+}
+
+.member-surface .el-result {
+  padding: 54px 20px;
+}
+
+.member-table {
+  width: 100%;
+}
+
+.member-name-cell {
+  min-width: 0;
+  display: flex;
+  padding: 4px 0;
+}
+
+.member-name-cell strong,
+.member-username {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-name-cell strong {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.member-username {
+  color: var(--app-muted);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.member-role-select {
+  width: 112px;
 }
 
 .endpoint-surface .el-result {
@@ -460,10 +506,25 @@ input {
   line-height: 1.55;
 }
 
-.drawer-actions {
+.dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.endpoint-dialog {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.endpoint-dialog .el-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.endpoint-dialog .el-dialog__footer {
+  flex-shrink: 0;
 }
 
 @media (max-width: 880px) {
@@ -545,7 +606,4 @@ input {
     gap: 0;
   }
 
-  .endpoint-drawer {
-    width: 100% !important;
-  }
 }

@@ -42,3 +42,36 @@ class ProjectSerializer(serializers.ModelSerializer):
             return None
 
         return membership.role
+
+
+class ProjectMemberSerializer(serializers.ModelSerializer):
+    username=serializers.CharField(source='user.username',read_only=True)
+    nickname=serializers.CharField(source='user.nickname',read_only=True)
+
+    class Meta:
+        model=ProjectMember
+        fields=[
+            'id',
+            'user',
+            'username',
+            'nickname',
+            'role',
+            'joined_at',
+        ]
+        read_only_fields=fields
+
+
+class ProjectMemberRoleSerializer(serializers.ModelSerializer):
+    role=serializers.ChoiceField(choices=[
+        (ProjectMember.Role.MEMBER,ProjectMember.Role.MEMBER.label),
+        (ProjectMember.Role.VIEWER,ProjectMember.Role.VIEWER.label),
+    ])
+
+    class Meta:
+        model=ProjectMember
+        fields=['role']
+
+    def validate_role(self,value):
+        if self.instance.role == ProjectMember.Role.OWNER:
+            raise serializers.ValidationError('不能修改项目拥有者的身份')
+        return value

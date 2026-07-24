@@ -7,3 +7,7 @@ export function login(credentials) {
 export function getCurrentUser() {
   return http.get('/auth/me/')
 }
+
+export function updateCurrentUser(data) {
+  return http.patch('/auth/me/', data)
+}

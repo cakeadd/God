@@ -25,20 +25,21 @@ const loading = ref(false)
 const loadError = ref(false)
 const keyword = ref('')
 const methodFilter = ref('')
-const drawerVisible = ref(false)
-const drawerMode = ref('view')
+const dialogVisible = ref(false)
+const dialogMode = ref('view')
 const detailLoading = ref(false)
 const saving = ref(false)
 const selectedEndpoint = ref(null)
 const formRef = ref()
+const initialEditState = ref(null)
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-const editableRoles = ['owner', 'admin', 'member']
+const editableRoles = ['owner', 'member']
 const canEdit = computed(() => editableRoles.includes(workspace.project?.my_role))
-const isReadOnly = computed(() => drawerMode.value === 'view')
-const drawerTitle = computed(() => {
-  if (drawerMode.value === 'create') return '新增接口'
-  if (drawerMode.value === 'edit') return '编辑接口'
+const isReadOnly = computed(() => dialogMode.value === 'view')
+const dialogTitle = computed(() => {
+  if (dialogMode.value === 'create') return '新增接口'
+  if (dialogMode.value === 'edit') return '编辑接口'
   return '接口详情'
 })
 
@@ -51,6 +52,23 @@ const form = reactive({
   queryParamsText: '{}',
   bodyText: '{}',
 })
+
+// 比较 JSON 的实际内容，避免空格、缩进和对象键顺序被误判为修改。
+function normalizeJsonValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeJsonValue)
+  }
+
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, normalizeJsonValue(value[key])]),
+    )
+  }
+
+  return value
+}
 
 function parseJsonObject(value, label) {
   const source = value.trim() || '{}'
@@ -68,6 +86,38 @@ function parseJsonObject(value, label) {
 
   return parsed
 }
+
+function comparableJsonValue(value) {
+  try {
+    return {
+      valid: true,
+      value: normalizeJsonValue(parseJsonObject(value, 'JSON')),
+    }
+  } catch {
+    return {
+      valid: false,
+      value: value.trim(),
+    }
+  }
+}
+
+function currentEditState() {
+  return {
+    name: form.name.trim(),
+    method: form.method,
+    path: form.path.trim(),
+    description: form.description.trim(),
+    headers: comparableJsonValue(form.headersText),
+    queryParams: comparableJsonValue(form.queryParamsText),
+    body: comparableJsonValue(form.bodyText),
+  }
+}
+
+const hasEditChanges = computed(() => (
+  dialogMode.value === 'edit'
+  && initialEditState.value !== null
+  && JSON.stringify(currentEditState()) !== JSON.stringify(initialEditState.value)
+))
 
 function jsonObjectValidator(label) {
   return (_rule, value, callback) => {
@@ -136,6 +186,10 @@ function fillForm(endpoint = null) {
   formRef.value?.clearValidate()
 }
 
+function captureEditState() {
+  initialEditState.value = currentEditState()
+}
+
 function apiErrorMessage(error, fallback) {
   const data = error.response?.data
   if (!data) return fallback
@@ -175,22 +229,29 @@ async function loadEndpoints() {
 
 function openCreate() {
   selectedEndpoint.value = null
-  drawerMode.value = 'create'
+  initialEditState.value = null
+  dialogMode.value = 'create'
   fillForm()
-  drawerVisible.value = true
+  dialogVisible.value = true
 }
 
 async function openEndpoint(endpoint, mode = 'view') {
-  drawerVisible.value = true
-  drawerMode.value = mode
+  initialEditState.value = null
+  dialogVisible.value = true
+  dialogMode.value = mode
   detailLoading.value = true
 
   try {
     const response = await getEndpoint(workspace.project.id, endpoint.id)
     selectedEndpoint.value = response.data
     fillForm(response.data)
+    if (mode === 'edit') {
+      captureEditState()
+    } else {
+      initialEditState.value = null
+    }
   } catch (error) {
-    drawerVisible.value = false
+    dialogVisible.value = false
     ElMessage.error(apiErrorMessage(error, '接口详情加载失败'))
   } finally {
     detailLoading.value = false
@@ -199,18 +260,50 @@ async function openEndpoint(endpoint, mode = 'view') {
 
 function startEdit() {
   if (!selectedEndpoint.value || !canEdit.value) return
-  drawerMode.value = 'edit'
+  dialogMode.value = 'edit'
   fillForm(selectedEndpoint.value)
+  captureEditState()
 }
 
-function cancelEdit() {
-  if (drawerMode.value === 'create') {
-    drawerVisible.value = false
+async function confirmDiscardEdit() {
+  if (!hasEditChanges.value) return true
+
+  try {
+    await ElMessageBox.confirm(
+      '当前修改尚未保存，确认放弃吗？',
+      '放弃修改',
+      {
+        confirmButtonText: '确认放弃',
+        cancelButtonText: '继续编辑',
+        type: 'warning',
+      },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function handleDialogClose(done) {
+  if (saving.value) return
+  if (dialogMode.value === 'edit' && !(await confirmDiscardEdit())) return
+  initialEditState.value = null
+  done()
+}
+
+async function cancelEdit() {
+  if (saving.value) return
+
+  if (dialogMode.value === 'create') {
+    dialogVisible.value = false
     return
   }
 
-  drawerMode.value = 'view'
+  if (!await confirmDiscardEdit()) return
+
+  dialogMode.value = 'view'
   fillForm(selectedEndpoint.value)
+  initialEditState.value = null
 }
 
 function buildPayload() {
@@ -227,12 +320,12 @@ function buildPayload() {
 
 async function submitEndpoint() {
   const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!valid || (dialogMode.value === 'edit' && !hasEditChanges.value)) return
 
   saving.value = true
   try {
     const payload = buildPayload()
-    const response = drawerMode.value === 'create'
+    const response = dialogMode.value === 'create'
       ? await createEndpoint(workspace.project.id, payload)
       : await updateEndpoint(
         workspace.project.id,
@@ -249,8 +342,9 @@ async function submitEndpoint() {
     }
 
     selectedEndpoint.value = savedEndpoint
-    drawerMode.value = 'view'
+    dialogMode.value = 'view'
     fillForm(savedEndpoint)
+    initialEditState.value = null
     ElMessage.success(existingIndex === -1 ? '接口已创建' : '接口已更新')
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, '接口保存失败'))
@@ -278,7 +372,7 @@ async function confirmDeactivate(endpoint) {
     await deactivateEndpoint(workspace.project.id, endpoint.id)
     endpoints.value = endpoints.value.filter((item) => item.id !== endpoint.id)
     if (selectedEndpoint.value?.id === endpoint.id) {
-      drawerVisible.value = false
+      dialogVisible.value = false
     }
     ElMessage.success('接口已停用')
   } catch (error) {
@@ -346,7 +440,7 @@ onMounted(loadEndpoints)
             <el-tag :type="methodTagType(row.method)" effect="plain">{{ row.method }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="接口" min-width="260">
+        <el-table-column label="接口" width="200">
           <template #default="{ row }">
             <div class="endpoint-name-cell">
               <strong>{{ row.name }}</strong>
@@ -354,14 +448,14 @@ onMounted(loadEndpoints)
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip>
+        <el-table-column prop="description" label="描述" width="220" show-overflow-tooltip>
           <template #default="{ row }">{{ row.description || '-' }}</template>
         </el-table-column>
         <el-table-column prop="created_by_username" label="创建人" width="120" />
         <el-table-column label="更新时间" width="176">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="132" fixed="right" align="center">
+        <el-table-column label="操作" width="132" align="center">
           <template #default="{ row }">
             <div class="table-actions">
               <el-tooltip content="查看" placement="top">
@@ -397,6 +491,7 @@ onMounted(loadEndpoints)
             </div>
           </template>
         </el-table-column>
+        <el-table-column min-width="1" />
       </el-table>
 
       <el-empty
@@ -406,12 +501,14 @@ onMounted(loadEndpoints)
       />
     </div>
 
-    <el-drawer
-      v-model="drawerVisible"
-      :title="drawerTitle"
-      size="720px"
-      class="endpoint-drawer"
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="860px"
+      class="endpoint-dialog"
+      align-center
       destroy-on-close
+      :before-close="handleDialogClose"
     >
       <div v-loading="detailLoading">
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
@@ -473,9 +570,9 @@ onMounted(loadEndpoints)
       </div>
 
       <template #footer>
-        <div class="drawer-actions">
+        <div class="dialog-actions">
           <template v-if="isReadOnly">
-            <el-button @click="drawerVisible = false">关闭</el-button>
+            <el-button @click="dialogVisible = false">关闭</el-button>
             <el-button
               v-if="canEdit && selectedEndpoint"
               type="danger"
@@ -490,12 +587,17 @@ onMounted(loadEndpoints)
           </template>
           <template v-else>
             <el-button :disabled="saving" @click="cancelEdit">取消</el-button>
-            <el-button type="primary" :loading="saving" @click="submitEndpoint">
-              {{ drawerMode === 'create' ? '创建接口' : '保存修改' }}
+            <el-button
+              type="primary"
+              :loading="saving"
+              :disabled="dialogMode === 'edit' && !hasEditChanges"
+              @click="submitEndpoint"
+            >
+              {{ dialogMode === 'create' ? '创建接口' : '保存修改' }}
             </el-button>
           </template>
         </div>
       </template>
-    </el-drawer>
+    </el-dialog>
   </section>
 </template>

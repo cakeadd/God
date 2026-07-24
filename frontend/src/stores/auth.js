@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 
-import { getCurrentUser, login as loginRequest } from '../api/auth'
+import {
+  getCurrentUser,
+  login as loginRequest,
+  updateCurrentUser,
+} from '../api/auth'
 import { clearTokens, getAccessToken, setTokens } from '../utils/tokenStorage'
 
 export const useAuthStore = defineStore('auth', {
@@ -22,6 +26,11 @@ export const useAuthStore = defineStore('auth', {
     },
     async fetchCurrentUser() {
       const response = await getCurrentUser()
+      this.user = response.data
+      return this.user
+    },
+    async updateProfile(data) {
+      const response = await updateCurrentUser(data)
       this.user = response.data
       return this.user
     },

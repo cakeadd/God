@@ -24,8 +24,7 @@ def can_manage_project(project,user):
     return has_project_role(
         project,
         user,
-        [ProjectMember.Role.OWNER,
-         ProjectMember.Role.ADMIN]
+        [ProjectMember.Role.OWNER]
     )
 
 def can_edit_project_resource(project,user):
@@ -33,6 +32,5 @@ def can_edit_project_resource(project,user):
         project,
         user,
         [ProjectMember.Role.OWNER,
-         ProjectMember.Role.ADMIN,
          ProjectMember.Role.MEMBER]
     )

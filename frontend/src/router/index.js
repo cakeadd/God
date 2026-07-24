@@ -7,6 +7,7 @@ const ProjectWorkspaceLayout = () => import('../layouts/ProjectWorkspaceLayout.v
 const LoginView = () => import('../views/LoginView.vue')
 const ProjectListView = () => import('../views/ProjectListView.vue')
 const EndpointListView = () => import('../views/EndpointListView.vue')
+const ProjectMemberListView = () => import('../views/ProjectMemberListView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -43,6 +44,11 @@ const router = createRouter({
               path: 'endpoints',
               name: 'project-endpoints',
               component: EndpointListView,
+            },
+            {
+              path: 'members',
+              name: 'project-members',
+              component: ProjectMemberListView,
             },
           ],
         },

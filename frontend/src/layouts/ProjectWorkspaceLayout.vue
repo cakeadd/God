@@ -1,7 +1,7 @@
 <script setup>
 import { computed, provide, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, Connection } from '@element-plus/icons-vue'
+import { ArrowLeft, Connection, User } from '@element-plus/icons-vue'
 
 import { getProject } from '../api/projects'
 import { projectWorkspaceKey } from '../composables/projectWorkspace'
@@ -15,7 +15,6 @@ const workspace = reactive({
 
 const roleLabels = {
   owner: '拥有者',
-  admin: '管理员',
   member: '成员',
   viewer: '只读成员',
 }
@@ -86,6 +85,13 @@ watch(
           >
             <el-icon><Connection /></el-icon>
             接口定义
+          </RouterLink>
+          <RouterLink
+            class="project-navigation__item"
+            :to="{ name: 'project-members', params: { projectId: workspace.project.id } }"
+          >
+            <el-icon><User /></el-icon>
+            项目成员
           </RouterLink>
         </nav>
 

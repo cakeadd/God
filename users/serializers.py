@@ -20,6 +20,46 @@ class UserSerializer(serializers.ModelSerializer):
             'username',
         ]
 
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    phone=serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=20,
+        validators=[],
+    )
+
+    class Meta:
+        model=User
+        fields=[
+            'id',
+            'username',
+            'email',
+            'nickname',
+            'phone',
+            'avatar',
+        ]
+        read_only_fields=[
+            'id',
+            'username',
+            'avatar',
+        ]
+
+    def validate_phone(self,value):
+        # 空手机号统一保存为 NULL，避免唯一字段保存多个空字符串时冲突。
+        phone=value.strip() if value else ''
+        if not phone:
+            return None
+
+        queryset=User.objects.filter(phone=phone)
+        if self.instance:
+            queryset=queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError('该手机号已被其他用户使用')
+
+        return phone
+
 class RegisterSerializer(serializers.ModelSerializer):
     password=serializers.CharField(
         write_only=True,
