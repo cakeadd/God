@@ -1,5 +1,9 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
+
 from .models import Project,ProjectMember
+
+User=get_user_model()
 
 class ProjectSerializer(serializers.ModelSerializer):
     owner_username=serializers.CharField(source='owner.username',read_only=True)
@@ -59,6 +63,39 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
             'joined_at',
         ]
         read_only_fields=fields
+
+
+class ProjectMemberCandidateSerializer(serializers.ModelSerializer):
+    is_project_member=serializers.BooleanField(read_only=True)
+    project_role=serializers.CharField(read_only=True,allow_null=True)
+
+    class Meta:
+        model=User
+        fields=[
+            'id',
+            'username',
+            'nickname',
+            'is_project_member',
+            'project_role',
+        ]
+        read_only_fields=fields
+
+
+class ProjectMemberCreateSerializer(serializers.ModelSerializer):
+    role=serializers.ChoiceField(choices=[
+        (ProjectMember.Role.MEMBER,ProjectMember.Role.MEMBER.label),
+        (ProjectMember.Role.VIEWER,ProjectMember.Role.VIEWER.label),
+    ])
+
+    class Meta:
+        model=ProjectMember
+        fields=['user','role']
+
+    def validate_user(self,value):
+        project=self.context['project']
+        if ProjectMember.objects.filter(project=project,user=value).exists():
+            raise serializers.ValidationError('该用户已经是项目成员')
+        return value
 
 
 class ProjectMemberRoleSerializer(serializers.ModelSerializer):

@@ -1,11 +1,15 @@
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from projects.models import Project
 from projects.permissions import can_edit_project_resource
+from God.pagination import StandardPageNumberPagination
+from .models import ApiEndpoint
 from .serializers import ApiEndpointSerializer
 
 class ApiEndpointListCreateView(APIView):
@@ -62,16 +66,30 @@ class ApiEndpointListCreateView(APIView):
 
         endpoints=project.api_endpoints.filter(
             is_active=True,
-        )
+        ).select_related('project','created_by')
+
+        search=request.query_params.get('search','').strip()
+        method=request.query_params.get('method','').strip().upper()
+        if search:
+            endpoints=endpoints.filter(
+                Q(name__icontains=search) | Q(path__icontains=search)
+            )
+        if method:
+            if method not in ApiEndpoint.Method.values:
+                raise ValidationError({'method':'不支持的请求方法'})
+            endpoints=endpoints.filter(method=method)
+
+        # 稳定排序可以避免翻页时相同时间的记录在相邻页面重复或遗漏。
+        endpoints=endpoints.order_by('-created_at','-id')
+        paginator=StandardPageNumberPagination()
+        page=paginator.paginate_queryset(endpoints,request,view=self)
         serializer=ApiEndpointSerializer(
-            endpoints,
+            page,
             many=True,
             context={'request':request}
         )
 
-        return Response(
-            serializer.data
-        )
+        return paginator.get_paginated_response(serializer.data)
 
 
 class ApiEndpointDetailView(APIView):

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Delete,
   Edit,
@@ -17,6 +17,7 @@ import {
   getEndpoints,
   updateEndpoint,
 } from '../api/endpoints'
+import AppPagination from '../components/AppPagination.vue'
 import { useProjectWorkspace } from '../composables/projectWorkspace'
 
 const workspace = useProjectWorkspace()
@@ -25,6 +26,9 @@ const loading = ref(false)
 const loadError = ref(false)
 const keyword = ref('')
 const methodFilter = ref('')
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(10)
 const dialogVisible = ref(false)
 const dialogMode = ref('view')
 const detailLoading = ref(false)
@@ -139,16 +143,10 @@ const rules = {
   bodyText: [{ validator: jsonObjectValidator('请求体'), trigger: 'blur' }],
 }
 
-const filteredEndpoints = computed(() => {
-  const normalizedKeyword = keyword.value.trim().toLowerCase()
+const hasListFilters = computed(() => Boolean(keyword.value.trim() || methodFilter.value))
 
-  return endpoints.value.filter((endpoint) => {
-    const matchesKeyword = !normalizedKeyword || [endpoint.name, endpoint.path]
-      .some((value) => value?.toLowerCase().includes(normalizedKeyword))
-    const matchesMethod = !methodFilter.value || endpoint.method === methodFilter.value
-    return matchesKeyword && matchesMethod
-  })
-})
+let endpointSearchTimer
+let latestEndpointRequestId = 0
 
 function formatTime(value) {
   if (!value) return '-'
@@ -213,18 +211,50 @@ function apiErrorMessage(error, fallback) {
 }
 
 async function loadEndpoints() {
+  // 只接收最后一次请求结果，避免快速搜索或翻页时旧响应覆盖新页面。
+  const requestId = ++latestEndpointRequestId
   loading.value = true
   loadError.value = false
 
   try {
-    const response = await getEndpoints(workspace.project.id)
-    endpoints.value = response.data
+    const response = await getEndpoints(workspace.project.id, {
+      page: currentPage.value,
+      page_size: pageSize.value,
+      search: keyword.value.trim() || undefined,
+      method: methodFilter.value || undefined,
+    })
+    if (requestId !== latestEndpointRequestId) return
+
+    endpoints.value = response.data.results
+    total.value = response.data.count
   } catch (error) {
+    if (requestId !== latestEndpointRequestId) return
     loadError.value = true
     ElMessage.error(apiErrorMessage(error, '接口列表加载失败'))
   } finally {
-    loading.value = false
+    if (requestId === latestEndpointRequestId) {
+      loading.value = false
+    }
   }
+}
+
+function changeEndpointPage(page) {
+  currentPage.value = page
+  loadEndpoints()
+}
+
+function changeEndpointPageSize(size) {
+  pageSize.value = size
+  currentPage.value = 1
+  loadEndpoints()
+}
+
+function scheduleEndpointSearch() {
+  clearTimeout(endpointSearchTimer)
+  endpointSearchTimer = setTimeout(() => {
+    currentPage.value = 1
+    loadEndpoints()
+  }, 300)
 }
 
 function openCreate() {
@@ -335,16 +365,14 @@ async function submitEndpoint() {
 
     const savedEndpoint = response.data
     const existingIndex = endpoints.value.findIndex((item) => item.id === savedEndpoint.id)
-    if (existingIndex === -1) {
-      endpoints.value.unshift(savedEndpoint)
-    } else {
-      endpoints.value.splice(existingIndex, 1, savedEndpoint)
-    }
-
     selectedEndpoint.value = savedEndpoint
     dialogMode.value = 'view'
     fillForm(savedEndpoint)
     initialEditState.value = null
+    if (existingIndex === -1) {
+      currentPage.value = 1
+    }
+    await loadEndpoints()
     ElMessage.success(existingIndex === -1 ? '接口已创建' : '接口已更新')
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, '接口保存失败'))
@@ -370,7 +398,10 @@ async function confirmDeactivate(endpoint) {
 
   try {
     await deactivateEndpoint(workspace.project.id, endpoint.id)
-    endpoints.value = endpoints.value.filter((item) => item.id !== endpoint.id)
+    if (endpoints.value.length === 1 && currentPage.value > 1) {
+      currentPage.value -= 1
+    }
+    await loadEndpoints()
     if (selectedEndpoint.value?.id === endpoint.id) {
       dialogVisible.value = false
     }
@@ -380,7 +411,15 @@ async function confirmDeactivate(endpoint) {
   }
 }
 
+watch(keyword, scheduleEndpointSearch)
+watch(methodFilter, () => {
+  clearTimeout(endpointSearchTimer)
+  currentPage.value = 1
+  loadEndpoints()
+})
+
 onMounted(loadEndpoints)
+onBeforeUnmount(() => clearTimeout(endpointSearchTimer))
 </script>
 
 <template>
@@ -388,7 +427,7 @@ onMounted(loadEndpoints)
     <div class="page-heading endpoint-heading">
       <div>
         <h2>接口定义</h2>
-        <p>共 {{ endpoints.length }} 个启用接口</p>
+        <p>共 {{ total }} 个启用接口</p>
       </div>
       <el-button v-if="canEdit" type="primary" :icon="Plus" @click="openCreate">
         新增接口
@@ -429,8 +468,8 @@ onMounted(loadEndpoints)
       </el-result>
 
       <el-table
-        v-else-if="filteredEndpoints.length"
-        :data="filteredEndpoints"
+        v-else-if="endpoints.length"
+        :data="endpoints"
         row-key="id"
         class="endpoint-table"
         @row-click="(row) => openEndpoint(row)"
@@ -497,7 +536,17 @@ onMounted(loadEndpoints)
       <el-empty
         v-else
         :image-size="72"
-        :description="endpoints.length ? '没有匹配的接口' : '当前项目还没有接口'"
+        :description="hasListFilters ? '没有匹配的接口' : '当前项目还没有接口'"
+      />
+
+      <AppPagination
+        v-if="total > 0 && !loadError"
+        :total="total"
+        :current-page="currentPage"
+        :page-size="pageSize"
+        :disabled="loading"
+        @page-change="changeEndpointPage"
+        @page-size-change="changeEndpointPageSize"
       />
     </div>
 

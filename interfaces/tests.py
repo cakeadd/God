@@ -204,10 +204,76 @@ class ApiEndpointAPITests(APITestCase):
         response = self.client.get(self.endpoint_list_url(self.project))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        names = [item['name'] for item in response.data]
+        self.assertEqual(response.data['count'], 1)
+        names = [item['name'] for item in response.data['results']]
         self.assertIn(active_endpoint.name, names)
         self.assertNotIn('Inactive Endpoint', names)
         self.assertNotIn('Other Project Endpoint', names)
+
+    def test_list_supports_server_side_pagination(self):
+        for index in range(12):
+            ApiEndpoint.objects.create(
+                project=self.project,
+                name=f'Endpoint {index:02d}',
+                method=ApiEndpoint.Method.GET,
+                path=f'/api/endpoints/{index}/',
+                created_by=self.owner,
+            )
+
+        self.auth_as_owner()
+        response = self.client.get(
+            self.endpoint_list_url(self.project),
+            {'page':2,'page_size':5},
+        )
+
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+        self.assertEqual(response.data['count'],12)
+        self.assertEqual(len(response.data['results']),5)
+        self.assertIsNotNone(response.data['next'])
+        self.assertIsNotNone(response.data['previous'])
+
+    def test_list_searches_name_and_path_and_filters_method(self):
+        ApiEndpoint.objects.create(
+            project=self.project,
+            name='User Detail',
+            method=ApiEndpoint.Method.GET,
+            path='/api/users/detail/',
+            created_by=self.owner,
+        )
+        ApiEndpoint.objects.create(
+            project=self.project,
+            name='Create User',
+            method=ApiEndpoint.Method.POST,
+            path='/api/users/',
+            created_by=self.owner,
+        )
+        ApiEndpoint.objects.create(
+            project=self.project,
+            name='Product Detail',
+            method=ApiEndpoint.Method.GET,
+            path='/api/products/detail/',
+            created_by=self.owner,
+        )
+
+        self.auth_as_owner()
+        response = self.client.get(
+            self.endpoint_list_url(self.project),
+            {'search':'user','method':'GET'},
+        )
+
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+        self.assertEqual(response.data['count'],1)
+        self.assertEqual(response.data['results'][0]['name'],'User Detail')
+
+    def test_list_rejects_invalid_method_filter(self):
+        self.auth_as_owner()
+        response = self.client.get(
+            self.endpoint_list_url(self.project),
+            {'method':'OPTIONS'},
+        )
+
+        self.assertEqual(response.status_code,status.HTTP_400_BAD_REQUEST)
+        self.assertIn('method',response.data)
 
     def test_detail_cannot_cross_project(self):
         endpoint = ApiEndpoint.objects.create(
@@ -264,4 +330,5 @@ class ApiEndpointAPITests(APITestCase):
         self.assertFalse(endpoint.is_active)
 
         list_response = self.client.get(self.endpoint_list_url(self.project))
-        self.assertEqual(list_response.data, [])
+        self.assertEqual(list_response.data['count'],0)
+        self.assertEqual(list_response.data['results'],[])

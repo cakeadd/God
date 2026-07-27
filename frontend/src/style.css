@@ -413,6 +413,11 @@ input {
   padding: 54px 20px;
 }
 
+.member-toolbar {
+  width: min(360px, 100%);
+  margin-bottom: 14px;
+}
+
 .member-table {
   width: 100%;
 }
@@ -443,6 +448,69 @@ input {
 
 .member-role-select {
   width: 112px;
+}
+
+.member-add-description {
+  margin: 0 0 14px;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.member-candidate-search {
+  width: 360px;
+  margin-bottom: 14px;
+}
+
+.member-candidate-surface {
+  min-height: 340px;
+  border: 1px solid var(--app-border);
+}
+
+.member-candidate-surface .el-result {
+  padding: 60px 20px;
+}
+
+.member-candidate-table .el-table__row {
+  cursor: pointer;
+}
+
+.member-add-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.member-role-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--app-muted);
+  font-size: 13px;
+}
+
+.member-role-picker .el-select {
+  width: 132px;
+}
+
+.app-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 18px;
+  border-top: 1px solid var(--app-border);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .endpoint-surface .el-result {

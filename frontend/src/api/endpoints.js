@@ -1,7 +1,7 @@
 import http from './http'
 
-export function getEndpoints(projectId) {
-  return http.get(`/projects/${projectId}/endpoints/`)
+export function getEndpoints(projectId, params = {}) {
+  return http.get(`/projects/${projectId}/endpoints/`, { params })
 }
 
 export function getEndpoint(projectId, endpointId) {
