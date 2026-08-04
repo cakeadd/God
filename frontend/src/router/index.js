@@ -8,6 +8,7 @@ const LoginView = () => import('../views/LoginView.vue')
 const ProjectListView = () => import('../views/ProjectListView.vue')
 const EndpointListView = () => import('../views/EndpointListView.vue')
 const ProjectMemberListView = () => import('../views/ProjectMemberListView.vue')
+const EnvironmentListView = () => import('../views/EnvironmentListView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -49,6 +50,11 @@ const router = createRouter({
               path: 'members',
               name: 'project-members',
               component: ProjectMemberListView,
+            },
+            {
+              path: 'environments',
+              name: 'project-environments',
+              component: EnvironmentListView,
             },
           ],
         },

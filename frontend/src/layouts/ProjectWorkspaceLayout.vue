@@ -1,7 +1,7 @@
 <script setup>
 import { computed, provide, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, Connection, User } from '@element-plus/icons-vue'
+import { ArrowLeft, Connection, SetUp, User } from '@element-plus/icons-vue'
 
 import { getProject } from '../api/projects'
 import { projectWorkspaceKey } from '../composables/projectWorkspace'
@@ -92,6 +92,13 @@ watch(
           >
             <el-icon><User /></el-icon>
             项目成员
+          </RouterLink>
+          <RouterLink
+            class="project-navigation__item"
+            :to="{ name: 'project-environments', params: { projectId: workspace.project.id } }"
+          >
+            <el-icon><SetUp /></el-icon>
+            环境管理
           </RouterLink>
         </nav>
 

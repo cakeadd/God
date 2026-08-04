@@ -1,11 +1,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Delete, Edit, Plus, Refresh } from '@element-plus/icons-vue'
+import { Box, Edit, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import {
   createProject,
+  archiveProject as archiveProjectRequest,
   getProject,
   getProjects,
   updateProject,
@@ -19,6 +20,7 @@ const projectDialogVisible = ref(false)
 const projectDialogMode = ref('create')
 const projectDialogLoading = ref(false)
 const projectSaving = ref(false)
+const archivingProjectId = ref(null)
 const editingProject = ref(null)
 const projectFormRef = ref()
 const projectForm = reactive({
@@ -228,6 +230,42 @@ async function submitProject() {
   }
 }
 
+async function archiveProject(project) {
+  try {
+    await ElMessageBox.confirm(
+      `归档后，“${project.name}”将不再出现在项目列表中，成员也无法继续访问该项目。接口、环境、测试用例和执行历史会被保留。`,
+      '归档项目',
+      {
+        confirmButtonText: '确认归档',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  archivingProjectId.value = project.id
+  try {
+    await archiveProjectRequest(project.id)
+    const projectIndex = projects.value.findIndex((item) => item.id === project.id)
+    if (projectIndex !== -1) {
+      projects.value.splice(projectIndex, 1)
+    }
+    ElMessage.success('项目已归档')
+  } catch (error) {
+    if (error.response?.status === 403) {
+      ElMessage.error('只有拥有者可以归档项目')
+    } else if (error.response?.status === 404) {
+      ElMessage.error('项目不存在或无权访问')
+    } else {
+      ElMessage.error('项目归档失败，请稍后重试')
+    }
+  } finally {
+    archivingProjectId.value = null
+  }
+}
+
 async function loadProjects() {
   loading.value = true
   loadError.value = false
@@ -302,6 +340,7 @@ onMounted(loadProjects)
                 :icon="Edit"
                 circle
                 text
+                :disabled="archivingProjectId === row.id"
                 aria-label="编辑项目"
                 @click.stop="openEdit(row)"
               />
@@ -309,16 +348,17 @@ onMounted(loadProjects)
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="删除" width="72" align="center">
+        <el-table-column label="归档" width="72" align="center">
           <template #default="{ row }">
-            <el-tooltip v-if="row.my_role === 'owner'" content="删除项目" placement="top">
+            <el-tooltip v-if="row.my_role === 'owner'" content="归档项目" placement="top">
               <el-button
-                :icon="Delete"
+                :icon="Box"
                 circle
                 text
                 type="danger"
-                aria-label="删除项目"
-                @click.stop
+                :loading="archivingProjectId === row.id"
+                aria-label="归档项目"
+                @click.stop="archiveProject(row)"
               />
             </el-tooltip>
             <span v-else>-</span>

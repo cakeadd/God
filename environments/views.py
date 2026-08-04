@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -6,6 +7,7 @@ from rest_framework.views import APIView
 
 from projects.permissions import can_edit_project_resource
 from projects.models import Project
+from God.pagination import StandardPageNumberPagination
 from .serializers import EnvironmentSerializer
 from .services import (
     DefaultEnvironmentError,
@@ -29,13 +31,20 @@ class EnvironmentListCreateView(APIView):
         project=self.get_project(request,project_id)
         environments=project.environments.filter(
             is_active=True
-        )
+        ).select_related('project')
+        search=request.query_params.get('search','').strip()
+        if search:
+            environments=environments.filter(name__icontains=search)
+        # 先完成项目和启用状态过滤，再固定排序后分页，避免翻页时记录重复或遗漏。
+        environments=environments.order_by('-is_default','-updated_at','-id')
+        paginator=StandardPageNumberPagination()
+        page=paginator.paginate_queryset(environments,request,view=self)
         serializer=EnvironmentSerializer(
-            environments,
+            page,
             many=True,
             context={'request':request}
         )
-        return Response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self,request,project_id):
         project=self.get_project(request,project_id)
@@ -48,7 +57,7 @@ class EnvironmentListCreateView(APIView):
 
         serializer=EnvironmentSerializer(
             data=request.data,
-            context={'request':request}
+            context={'request':request, 'project':project}
         )
 
         serializer.is_valid(raise_exception=True)
@@ -102,7 +111,7 @@ class EnvironmentDetailView(APIView):
             environment,
             data=request.data,
             partial=True,
-            context={'request':request}
+            context={'request':request, 'project':environment.project}
         )
         serializer.is_valid(raise_exception=True)
         try:

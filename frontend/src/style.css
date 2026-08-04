@@ -374,12 +374,14 @@ input {
 }
 
 .endpoint-heading,
-.member-heading {
+.member-heading,
+.environment-heading {
   align-items: center;
 }
 
 .endpoint-heading h2,
-.member-heading h2 {
+.member-heading h2,
+.environment-heading h2 {
   margin: 0;
   color: var(--app-text);
   font-size: 20px;
@@ -388,17 +390,30 @@ input {
 }
 
 .endpoint-heading p,
-.member-heading p {
+.member-heading p,
+.environment-heading p {
   margin: 6px 0 0;
   color: var(--app-muted);
   font-size: 13px;
 }
 
 .endpoint-toolbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 360px) 150px 40px;
-  gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.endpoint-toolbar__search {
+  width: min(360px, 100%);
+}
+
+.endpoint-toolbar .el-select {
+  width: 150px;
+}
+
+.endpoint-toolbar .el-button:last-child {
+  margin-left: auto;
 }
 
 .endpoint-surface {
@@ -414,8 +429,64 @@ input {
 }
 
 .member-toolbar {
-  width: min(360px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.member-toolbar__search {
+  width: min(360px, 100%);
+}
+
+.member-toolbar .el-button:last-child {
+  margin-left: auto;
+}
+
+.environment-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.environment-toolbar__search {
+  width: min(360px, 100%);
+  margin-right: auto;
+}
+
+.environment-surface {
+  min-height: 320px;
+}
+
+.environment-surface .el-result {
+  padding: 54px 20px;
+}
+
+.environment-table {
+  width: 100%;
+}
+
+.environment-base-url {
+  color: #58636d;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.environment-dialog {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.environment-dialog .el-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.environment-dialog .el-dialog__footer {
+  flex-shrink: 0;
 }
 
 .member-table {
@@ -665,8 +736,9 @@ input {
     align-items: flex-start;
   }
 
-  .endpoint-toolbar {
-    grid-template-columns: minmax(0, 1fr) 118px 40px;
+  .endpoint-toolbar__search,
+  .member-toolbar__search {
+    width: min(260px, 100%);
   }
 
   .endpoint-form-grid {

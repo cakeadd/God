@@ -205,6 +205,49 @@ class TestCaseAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('assertions', response.data)
 
+    def test_create_and_update_reject_duplicate_testcase_name(self):
+        existing_test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Existing Test Case',
+            created_by=self.owner,
+        )
+        editable_test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Editable Test Case',
+            created_by=self.owner,
+        )
+        self.auth_as_member()
+
+        create_response = self.client.post(
+            self.get_testcase_list_url(self.project),
+            {
+                'endpoint': self.endpoint.id,
+                'environment': self.environment.id,
+                'name': existing_test_case.name,
+            },
+            format='json',
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(create_response.data['name'][0]),
+            '当前项目已存在同名测试用例，请修改用例名称后重试。',
+        )
+
+        update_response = self.client.patch(
+            self.get_testcase_detail_url(self.project, editable_test_case),
+            {'name': existing_test_case.name},
+            format='json',
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(update_response.data['name'][0]),
+            '当前项目已存在同名测试用例，请修改用例名称后重试。',
+        )
+
     def test_list_only_returns_active_testcases_in_project(self):
         active_case = ApiTestCase.objects.create(
             project=self.project,

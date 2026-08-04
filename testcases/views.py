@@ -45,7 +45,7 @@ class TestCaseListCreateView(APIView):
 
         serializer=TestCaseSerializer(
             data=request.data,
-            context={'request':request}
+            context={'request':request, 'project':project}
         )
         serializer.is_valid(raise_exception=True)
 
@@ -120,7 +120,7 @@ class TestCaseDetailView(APIView):
             test_case,
             data=request.data,
             partial=True,
-            context={'request':request}
+            context={'request':request, 'project':test_case.project}
         )
         serializer.is_valid(raise_exception=True)
 

@@ -4,7 +4,6 @@ import {
   Delete,
   Edit,
   Plus,
-  Refresh,
   Search,
   View,
 } from '@element-plus/icons-vue'
@@ -429,14 +428,12 @@ onBeforeUnmount(() => clearTimeout(endpointSearchTimer))
         <h2>接口定义</h2>
         <p>共 {{ total }} 个启用接口</p>
       </div>
-      <el-button v-if="canEdit" type="primary" :icon="Plus" @click="openCreate">
-        新增接口
-      </el-button>
     </div>
 
     <div class="endpoint-toolbar">
       <el-input
         v-model="keyword"
+        class="endpoint-toolbar__search"
         :prefix-icon="Search"
         clearable
         placeholder="搜索名称或路径"
@@ -445,15 +442,9 @@ onBeforeUnmount(() => clearTimeout(endpointSearchTimer))
       <el-select v-model="methodFilter" clearable placeholder="全部方法" aria-label="筛选请求方法">
         <el-option v-for="method in methods" :key="method" :label="method" :value="method" />
       </el-select>
-      <el-tooltip content="刷新接口列表" placement="bottom">
-        <el-button
-          :icon="Refresh"
-          circle
-          :loading="loading"
-          aria-label="刷新接口列表"
-          @click="loadEndpoints"
-        />
-      </el-tooltip>
+      <el-button type="primary" :icon="Plus" :disabled="!canEdit" @click="openCreate">
+        新增接口
+      </el-button>
     </div>
 
     <div class="data-surface endpoint-surface" v-loading="loading">

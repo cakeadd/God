@@ -15,3 +15,7 @@ export function getProject(projectId) {
 export function updateProject(projectId, data) {
   return http.patch(`/projects/${projectId}/`, data)
 }
+
+export function archiveProject(projectId) {
+  return http.delete(`/projects/${projectId}/`)
+}

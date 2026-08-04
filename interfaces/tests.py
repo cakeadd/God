@@ -161,6 +161,52 @@ class ApiEndpointAPITests(APITestCase):
                     '必须是 JSON 对象',
                 )
 
+    def test_create_and_update_reject_duplicate_method_and_path(self):
+        existing_endpoint = ApiEndpoint.objects.create(
+            project=self.project,
+            name='Existing Endpoint',
+            method=ApiEndpoint.Method.GET,
+            path='/api/existing/',
+            created_by=self.owner,
+        )
+        editable_endpoint = ApiEndpoint.objects.create(
+            project=self.project,
+            name='Editable Endpoint',
+            method=ApiEndpoint.Method.POST,
+            path='/api/editable/',
+            created_by=self.owner,
+        )
+        self.auth_as_member()
+
+        create_response = self.client.post(
+            self.endpoint_list_url(self.project),
+            {
+                'name': 'Duplicate Endpoint',
+                'method': existing_endpoint.method,
+                'path': existing_endpoint.path,
+            },
+            format='json',
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(create_response.data['path'][0]),
+            '当前项目已存在相同请求方法和接口路径的接口。',
+        )
+
+        update_response = self.client.patch(
+            self.endpoint_detail_url(self.project, editable_endpoint),
+            {
+                'method': existing_endpoint.method,
+                'path': existing_endpoint.path,
+            },
+            format='json',
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(update_response.data['path'][0]),
+            '当前项目已存在相同请求方法和接口路径的接口。',
+        )
+
     def test_viewer_cannot_create_endpoint(self):
         self.auth_as_viewer()
 

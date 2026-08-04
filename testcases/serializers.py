@@ -50,6 +50,22 @@ class TestCaseSerializer(serializers.ModelSerializer):
 
         return obj.environment.name
 
+    def validate_name(self, value):
+        project = self.context.get('project')
+        if project is None:
+            return value
+
+        # 测试用例名称是当前项目内的业务标识，创建和编辑都使用相同的唯一性规则。
+        test_cases = TestCase.objects.filter(project=project, name=value)
+        if self.instance is not None:
+            test_cases = test_cases.exclude(pk=self.instance.pk)
+
+        if test_cases.exists():
+            raise serializers.ValidationError(
+                '当前项目已存在同名测试用例，请修改用例名称后重试。'
+            )
+        return value
+
     def validate_assertions(self, assertions):
         if not isinstance(assertions, list):
             raise serializers.ValidationError('断言规则必须是列表')

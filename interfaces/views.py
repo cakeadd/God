@@ -33,19 +33,9 @@ class ApiEndpointListCreateView(APIView):
             )
         serializer=ApiEndpointSerializer(
             data=request.data,
-            context={'request':request}
+            context={'request':request, 'project':project}
         )
         serializer.is_valid(raise_exception=True)
-
-        method = serializer.validated_data['method']
-        path = serializer.validated_data['path']
-
-        if project.api_endpoints.filter(method=method, path=path).exists():
-            return Response(
-                {'detail': '该项目下已存在相同请求方法和路径的接口'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
 
         endpoint=serializer.save(
             project=project,
@@ -133,7 +123,7 @@ class ApiEndpointDetailView(APIView):
             endpoint,
             data=request.data,
             partial=True,
-            context={'request':request}
+            context={'request':request, 'project':endpoint.project}
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()

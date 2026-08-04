@@ -391,6 +391,17 @@ onBeforeUnmount(() => clearTimeout(memberSearchTimer))
         <h2>项目成员</h2>
         <p>共 {{ total }} 位成员</p>
       </div>
+    </div>
+
+    <div class="member-toolbar">
+      <el-input
+        v-model="keyword"
+        class="member-toolbar__search"
+        :prefix-icon="Search"
+        clearable
+        placeholder="搜索成员名称或唯一名称"
+        aria-label="搜索成员名称或唯一名称"
+      />
       <el-button
         type="primary"
         :icon="Plus"
@@ -399,16 +410,6 @@ onBeforeUnmount(() => clearTimeout(memberSearchTimer))
       >
         增加成员
       </el-button>
-    </div>
-
-    <div class="member-toolbar">
-      <el-input
-        v-model="keyword"
-        :prefix-icon="Search"
-        clearable
-        placeholder="搜索成员名称或唯一名称"
-        aria-label="搜索成员名称或唯一名称"
-      />
     </div>
 
     <div class="data-surface member-surface" v-loading="loading">

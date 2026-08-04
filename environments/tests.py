@@ -146,6 +146,72 @@ class EnvironmentAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_variables_must_be_json_object(self):
+        environment = Environment.objects.create(
+            project=self.project,
+            name='Existing Env',
+            base_url='http://existing.example.com',
+        )
+        self.auth_as_member()
+
+        create_response = self.client.post(
+            self.environment_list_url(self.project),
+            {
+                'name': 'Invalid Variables Env',
+                'base_url': 'http://invalid.example.com',
+                'variables': ['token', 'invalid'],
+            },
+            format='json',
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('variables', create_response.data)
+
+        update_response = self.client.patch(
+            self.environment_detail_url(self.project, environment),
+            {'variables': 'invalid'},
+            format='json',
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('variables', update_response.data)
+
+    def test_create_and_update_reject_duplicate_environment_name(self):
+        existing_environment = Environment.objects.create(
+            project=self.project,
+            name='Existing Env',
+            base_url='http://existing.example.com',
+        )
+        editable_environment = Environment.objects.create(
+            project=self.project,
+            name='Editable Env',
+            base_url='http://editable.example.com',
+        )
+        self.auth_as_member()
+
+        create_response = self.client.post(
+            self.environment_list_url(self.project),
+            {
+                'name': existing_environment.name,
+                'base_url': 'http://duplicate.example.com',
+            },
+            format='json',
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(create_response.data['name'][0]),
+            '当前项目已存在同名环境，请修改环境名称后重试。',
+        )
+
+        update_response = self.client.patch(
+            self.environment_detail_url(self.project, editable_environment),
+            {'name': existing_environment.name},
+            format='json',
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            str(update_response.data['name'][0]),
+            '当前项目已存在同名环境，请修改环境名称后重试。',
+        )
+
     def test_first_environment_becomes_default_automatically(self):
         self.auth_as_member()
 
@@ -278,10 +344,87 @@ class EnvironmentAPITests(APITestCase):
         response = self.client.get(self.environment_list_url(self.project))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        names = [item['name'] for item in response.data]
+        self.assertEqual(response.data['count'], 1)
+        names = [item['name'] for item in response.data['results']]
         self.assertIn(active_environment.name, names)
         self.assertNotIn('Inactive Env', names)
         self.assertNotIn('Other Env', names)
+
+    def test_list_is_paginated_and_default_environment_is_first(self):
+        default_environment = Environment.objects.create(
+            project=self.project,
+            name='Default Env',
+            base_url='http://default.example.com',
+            is_default=True,
+        )
+        for index in range(10):
+            Environment.objects.create(
+                project=self.project,
+                name=f'Env {index}',
+                base_url=f'http://env-{index}.example.com',
+            )
+
+        self.auth_as_owner()
+        response = self.client.get(self.environment_list_url(self.project))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 11)
+        self.assertEqual(len(response.data['results']), 10)
+        self.assertEqual(response.data['results'][0]['id'], default_environment.id)
+        self.assertIsNotNone(response.data['next'])
+        self.assertIsNone(response.data['previous'])
+
+        second_page_response = self.client.get(
+            f'{self.environment_list_url(self.project)}?page=2'
+        )
+        self.assertEqual(second_page_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(second_page_response.data['results']), 1)
+        self.assertIsNotNone(second_page_response.data['previous'])
+
+    def test_list_accepts_custom_page_size(self):
+        for index in range(3):
+            Environment.objects.create(
+                project=self.project,
+                name=f'Env {index}',
+                base_url=f'http://env-{index}.example.com',
+            )
+
+        self.auth_as_owner()
+        response = self.client.get(
+            f'{self.environment_list_url(self.project)}?page_size=2'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 3)
+        self.assertEqual(len(response.data['results']), 2)
+
+    def test_list_searches_active_environment_name_before_pagination(self):
+        matched_environment = Environment.objects.create(
+            project=self.project,
+            name='Staging Environment',
+            base_url='http://staging.example.com',
+        )
+        Environment.objects.create(
+            project=self.project,
+            name='Inactive Staging Environment',
+            base_url='http://inactive-staging.example.com',
+            is_active=False,
+        )
+        Environment.objects.create(
+            project=self.other_project,
+            name='Other Staging Environment',
+            base_url='http://other-staging.example.com',
+        )
+
+        self.auth_as_owner()
+        response = self.client.get(
+            f'{self.environment_list_url(self.project)}?search=staging'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], matched_environment.id)
 
     def test_detail_cannot_cross_project(self):
         environment = Environment.objects.create(
@@ -340,4 +483,27 @@ class EnvironmentAPITests(APITestCase):
         self.assertFalse(environment.is_active)
 
         list_response = self.client.get(self.environment_list_url(self.project))
-        self.assertEqual(list_response.data, [])
+        self.assertEqual(list_response.data['count'], 0)
+        self.assertEqual(list_response.data['results'], [])
+
+        detail_response = self.client.get(
+            self.environment_detail_url(self.project, environment)
+        )
+        self.assertEqual(detail_response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_viewer_cannot_deactivate_environment(self):
+        environment = Environment.objects.create(
+            project=self.project,
+            name='Protected Env',
+            base_url='http://protected.example.com',
+            is_default=True,
+        )
+        self.auth_as_viewer()
+
+        response = self.client.delete(
+            self.environment_detail_url(self.project, environment)
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        environment.refresh_from_db()
+        self.assertTrue(environment.is_active)
