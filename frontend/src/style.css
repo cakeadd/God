@@ -375,13 +375,15 @@ input {
 
 .endpoint-heading,
 .member-heading,
-.environment-heading {
+.environment-heading,
+.testcase-heading {
   align-items: center;
 }
 
 .endpoint-heading h2,
 .member-heading h2,
-.environment-heading h2 {
+.environment-heading h2,
+.testcase-heading h2 {
   margin: 0;
   color: var(--app-text);
   font-size: 20px;
@@ -391,7 +393,8 @@ input {
 
 .endpoint-heading p,
 .member-heading p,
-.environment-heading p {
+.environment-heading p,
+.testcase-heading p {
   margin: 6px 0 0;
   color: var(--app-muted);
   font-size: 13px;
@@ -468,6 +471,10 @@ input {
   width: 100%;
 }
 
+.environment-table .el-table__row {
+  cursor: pointer;
+}
+
 .environment-base-url {
   color: #58636d;
   font-family: Consolas, "Courier New", monospace;
@@ -487,6 +494,209 @@ input {
 
 .environment-dialog .el-dialog__footer {
   flex-shrink: 0;
+}
+
+.testcase-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.testcase-toolbar__search {
+  width: 360px;
+}
+
+.testcase-toolbar .el-select {
+  width: 180px;
+}
+
+.testcase-toolbar .el-button:last-child {
+  margin-left: auto;
+}
+
+.testcase-surface {
+  min-height: 320px;
+}
+
+.testcase-surface .el-result {
+  padding: 54px 20px;
+}
+
+.testcase-table {
+  width: 100%;
+}
+
+.testcase-table .el-table__row {
+  cursor: pointer;
+}
+
+.testcase-name-cell,
+.testcase-endpoint-cell,
+.testcase-result-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0;
+}
+
+.testcase-name-cell strong,
+.testcase-name-cell span,
+.testcase-endpoint-cell code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.testcase-name-cell strong,
+.testcase-endpoint-cell strong,
+.testcase-result-cell strong {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.testcase-name-cell span,
+.testcase-result-cell span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.testcase-endpoint-cell > div,
+.testcase-environment-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.testcase-endpoint-cell code {
+  color: #58636d;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.testcase-detail {
+  min-height: 160px;
+}
+
+.testcase-detail__json-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.testcase-detail__json-grid section {
+  min-width: 0;
+}
+
+.testcase-detail__json-grid h3 {
+  margin: 0 0 7px;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.testcase-detail__json-grid pre {
+  min-height: 90px;
+  max-height: 220px;
+  margin: 0;
+  padding: 11px 12px;
+  overflow: auto;
+  border: 1px solid var(--app-border);
+  background: #f7f9fa;
+  color: #44515c;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.testcase-actions .el-button.is-disabled {
+  color: #a9b1b8;
+  opacity: 1;
+}
+
+.testcase-actions .el-button--danger.is-disabled {
+  color: #c5a1a1;
+}
+
+.testcase-dialog {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.testcase-dialog .el-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.testcase-dialog .el-dialog__footer {
+  flex-shrink: 0;
+}
+
+.testcase-form__section + .testcase-form__section {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--app-border);
+}
+
+.testcase-form__section > h3,
+.testcase-assertions__heading h3 {
+  margin: 0 0 14px;
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.testcase-form__grid,
+.testcase-json-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+}
+
+.testcase-form__grid .el-select,
+.testcase-form__grid .el-input-number {
+  width: 100%;
+}
+
+.testcase-form__full {
+  grid-column: 1 / -1;
+}
+
+.testcase-assertions__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.testcase-assertions__heading h3 {
+  margin-bottom: 0;
+}
+
+.testcase-assertion-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
+  gap: 12px;
+  align-items: start;
+}
+
+.testcase-assertion-row > .el-button {
+  margin-top: 30px;
+}
+
+.testcase-assertions__empty {
+  padding: 20px 0;
+  border-top: 1px dashed var(--app-border);
+  border-bottom: 1px dashed var(--app-border);
+  color: var(--app-muted);
+  text-align: center;
+  font-size: 13px;
 }
 
 .member-table {

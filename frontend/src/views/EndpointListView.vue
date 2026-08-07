@@ -612,18 +612,7 @@ onBeforeUnmount(() => clearTimeout(endpointSearchTimer))
       <template #footer>
         <div class="dialog-actions">
           <template v-if="isReadOnly">
-            <el-button @click="dialogVisible = false">关闭</el-button>
-            <el-button
-              v-if="canEdit && selectedEndpoint"
-              type="danger"
-              plain
-              @click="confirmDeactivate(selectedEndpoint)"
-            >
-              停用接口
-            </el-button>
-            <el-button v-if="canEdit && selectedEndpoint" type="primary" :icon="Edit" @click="startEdit">
-              编辑
-            </el-button>
+            <el-button type="primary" @click="dialogVisible = false">关闭</el-button>
           </template>
           <template v-else>
             <el-button :disabled="saving" @click="cancelEdit">取消</el-button>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Search, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import {
@@ -33,9 +33,12 @@ const removingEnvironmentIds = ref(new Set())
 const editableRoles = ['owner', 'member']
 const canEdit = computed(() => editableRoles.includes(workspace.project?.my_role))
 const hasListFilters = computed(() => Boolean(keyword.value.trim()))
-const dialogTitle = computed(() => (
-  dialogMode.value === 'create' ? '新增环境' : '编辑环境'
-))
+const dialogTitle = computed(() => ({
+  create: '新增环境',
+  edit: '编辑环境',
+  view: '查看环境',
+}[dialogMode.value]))
+const formReadOnly = computed(() => detailLoading.value || dialogMode.value === 'view')
 
 const form = reactive({
   name: '',
@@ -110,7 +113,9 @@ const hasFormChanges = computed(() => (
   && JSON.stringify(currentFormState()) !== JSON.stringify(initialFormState.value)
 ))
 const canSubmit = computed(() => (
-  dialogMode.value === 'create'
+  dialogMode.value === 'view'
+    ? false
+    : dialogMode.value === 'create'
     ? Boolean(form.name.trim() && form.baseUrl.trim())
     : hasFormChanges.value
 ))
@@ -279,7 +284,27 @@ async function openEdit(environment) {
   }
 }
 
+async function openView(environment) {
+  selectedEnvironment.value = environment
+  dialogMode.value = 'view'
+  dialogVisible.value = true
+  detailLoading.value = true
+  initialFormState.value = null
+
+  try {
+    const response = await getEnvironment(workspace.project.id, environment.id)
+    selectedEnvironment.value = response.data
+    fillForm(response.data)
+  } catch (error) {
+    dialogVisible.value = false
+    ElMessage.error(apiErrorMessage(error, '环境详情加载失败'))
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 async function confirmDiscardChanges() {
+  if (dialogMode.value === 'view') return true
   if (!hasFormChanges.value) return true
 
   const isCreate = dialogMode.value === 'create'
@@ -372,6 +397,7 @@ function buildPayload() {
 }
 
 async function submitEnvironment() {
+  if (dialogMode.value === 'view') return
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid || !canSubmit.value) return
 
@@ -447,9 +473,10 @@ onBeforeUnmount(() => clearTimeout(environmentSearchTimer))
         :data="environments"
         row-key="id"
         class="environment-table"
+        @row-click="openView"
       >
-        <el-table-column prop="name" label="环境名称" min-width="160" />
-        <el-table-column label="基础地址" min-width="220" show-overflow-tooltip>
+        <el-table-column prop="name" label="环境名称" width="180" />
+        <el-table-column label="基础地址" width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <code class="environment-base-url">{{ row.base_url }}</code>
           </template>
@@ -466,36 +493,38 @@ onBeforeUnmount(() => clearTimeout(environmentSearchTimer))
         <el-table-column label="更新时间" width="176">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="编辑" width="72" align="center">
+        <el-table-column label="操作" width="132" align="center">
           <template #default="{ row }">
-            <el-tooltip content="编辑环境" placement="top">
-              <el-button
-                :icon="Edit"
-                circle
-                text
-                :disabled="!canEdit || isRemoving(row.id)"
-                aria-label="编辑环境"
-                @click="openEdit(row)"
-              />
-            </el-tooltip>
+            <div class="table-actions" @click.stop>
+              <el-tooltip content="查看" placement="top">
+                <el-button :icon="View" circle text aria-label="查看环境" @click="openView(row)" />
+              </el-tooltip>
+              <el-tooltip content="编辑" placement="top">
+                <el-button
+                  :icon="Edit"
+                  circle
+                  text
+                  :disabled="!canEdit || isRemoving(row.id)"
+                  aria-label="编辑环境"
+                  @click="openEdit(row)"
+                />
+              </el-tooltip>
+              <el-tooltip content="停用" placement="top">
+                <el-button
+                  :icon="Delete"
+                  circle
+                  text
+                  type="danger"
+                  :loading="isRemoving(row.id)"
+                  :disabled="!canEdit || isRemoving(row.id)"
+                  aria-label="停用环境"
+                  @click="deactivateSelectedEnvironment(row)"
+                />
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="停用" width="72" align="center">
-          <template #default="{ row }">
-            <el-tooltip content="停用环境" placement="top">
-              <el-button
-                :icon="Delete"
-                circle
-                text
-                type="danger"
-                :loading="isRemoving(row.id)"
-                :disabled="!canEdit || isRemoving(row.id)"
-                aria-label="停用环境"
-                @click="deactivateSelectedEnvironment(row)"
-              />
-            </el-tooltip>
-          </template>
-        </el-table-column>
+        <el-table-column min-width="1" />
       </el-table>
 
       <el-empty
@@ -528,13 +557,13 @@ onBeforeUnmount(() => clearTimeout(environmentSearchTimer))
       <div v-loading="detailLoading">
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
           <el-form-item label="环境名称" prop="name">
-            <el-input v-model="form.name" maxlength="100" show-word-limit :disabled="detailLoading" />
+            <el-input v-model="form.name" maxlength="100" show-word-limit :disabled="formReadOnly" />
           </el-form-item>
           <el-form-item label="基础地址" prop="baseUrl">
             <el-input
               v-model="form.baseUrl"
               placeholder="https://api.example.com"
-              :disabled="detailLoading"
+              :disabled="formReadOnly"
             />
           </el-form-item>
           <el-form-item label="环境变量（JSON 对象）" prop="variablesText">
@@ -544,7 +573,7 @@ onBeforeUnmount(() => clearTimeout(environmentSearchTimer))
               :autosize="{ minRows: 6, maxRows: 12 }"
               spellcheck="false"
               class="json-editor"
-              :disabled="detailLoading"
+              :disabled="formReadOnly"
             />
           </el-form-item>
           <el-form-item label="环境描述" prop="description">
@@ -554,17 +583,20 @@ onBeforeUnmount(() => clearTimeout(environmentSearchTimer))
               :rows="3"
               maxlength="1000"
               show-word-limit
-              :disabled="detailLoading"
+              :disabled="formReadOnly"
             />
           </el-form-item>
           <el-form-item label="设为默认环境" prop="isDefault">
-            <el-switch v-model="form.isDefault" :disabled="detailLoading" />
+            <el-switch v-model="form.isDefault" :disabled="formReadOnly" />
           </el-form-item>
         </el-form>
       </div>
 
       <template #footer>
-        <div class="dialog-actions">
+        <div v-if="dialogMode === 'view'" class="dialog-actions">
+          <el-button type="primary" @click="dialogVisible = false">关闭</el-button>
+        </div>
+        <div v-else class="dialog-actions">
           <el-button :disabled="saving" @click="cancelDialog">取消</el-button>
           <el-button
             type="primary"

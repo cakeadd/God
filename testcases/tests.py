@@ -205,6 +205,63 @@ class TestCaseAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('assertions', response.data)
 
+    def test_create_rejects_non_object_request_overrides(self):
+        self.auth_as_member()
+
+        for index, field_name in enumerate(('headers', 'query_params', 'body')):
+            with self.subTest(field_name=field_name):
+                response = self.client.post(
+                    self.get_testcase_list_url(self.project),
+                    {
+                        'endpoint': self.endpoint.id,
+                        'name': f'Invalid override {index}',
+                        field_name: [],
+                    },
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(str(response.data[field_name][0]), '必须是 JSON 对象')
+
+    def test_create_rejects_invalid_expected_status_code(self):
+        self.auth_as_member()
+
+        for expected_status_code in (99, 600):
+            with self.subTest(expected_status_code=expected_status_code):
+                response = self.client.post(
+                    self.get_testcase_list_url(self.project),
+                    {
+                        'endpoint': self.endpoint.id,
+                        'name': f'Invalid status {expected_status_code}',
+                        'expected_status_code': expected_status_code,
+                    },
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn('expected_status_code', response.data)
+
+    def test_create_rejects_invalid_legacy_status_code_assertion(self):
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_testcase_list_url(self.project),
+            {
+                'endpoint': self.endpoint.id,
+                'name': 'Invalid legacy status assertion',
+                'assertions': [
+                    {
+                        'type': 'status_code',
+                        'expected': '200',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('assertions', response.data)
+
     def test_create_and_update_reject_duplicate_testcase_name(self):
         existing_test_case = ApiTestCase.objects.create(
             project=self.project,
@@ -281,10 +338,80 @@ class TestCaseAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        names = [item['name'] for item in response.data]
+        self.assertEqual(response.data['count'], 1)
+        names = [item['name'] for item in response.data['results']]
         self.assertIn(active_case.name, names)
         self.assertNotIn('Inactive Case', names)
         self.assertNotIn('Other Project Case', names)
+
+    def test_list_supports_pagination_and_returns_display_fields(self):
+        for index in range(11):
+            ApiTestCase.objects.create(
+                project=self.project,
+                endpoint=self.endpoint,
+                environment=self.environment,
+                name=f'Case {index:02d}',
+                assertions=[{'type':'status_code','expected':200}],
+                created_by=self.owner,
+            )
+
+        self.auth_as_member()
+        response = self.client.get(
+            self.get_testcase_list_url(self.project),
+            {'page':2,'page_size':5},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 11)
+        self.assertEqual(len(response.data['results']), 5)
+        item=response.data['results'][0]
+        self.assertEqual(item['endpoint_method'], self.endpoint.method)
+        self.assertEqual(item['endpoint_path'], self.endpoint.path)
+        self.assertTrue(item['endpoint_is_active'])
+        self.assertTrue(item['environment_is_active'])
+        self.assertEqual(item['assertion_count'], 1)
+
+    def test_list_searches_and_filters_by_active_endpoint_and_environment(self):
+        other_endpoint=ApiEndpoint.objects.create(
+            project=self.project,
+            name='User Detail',
+            method=ApiEndpoint.Method.GET,
+            path='/api/users/detail/',
+            created_by=self.owner,
+        )
+        other_environment=Environment.objects.create(
+            project=self.project,
+            name='Staging Env',
+            base_url='http://staging.example.com',
+        )
+        matched_case=ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=other_endpoint,
+            environment=other_environment,
+            name='User detail success',
+            created_by=self.owner,
+        )
+        ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            environment=self.environment,
+            name='Product list success',
+            created_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response=self.client.get(
+            self.get_testcase_list_url(self.project),
+            {
+                'search':'users/detail',
+                'endpoint':other_endpoint.id,
+                'environment':other_environment.id,
+            },
+        )
+
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+        self.assertEqual(response.data['count'],1)
+        self.assertEqual(response.data['results'][0]['id'],matched_case.id)
 
     def test_cannot_create_testcase_with_endpoint_from_other_project(self):
         self.auth_as_member()
@@ -356,4 +483,5 @@ class TestCaseAPITests(APITestCase):
             self.get_testcase_list_url(self.project)
         )
 
-        self.assertEqual(list_response.data, [])
+        self.assertEqual(list_response.data['count'], 0)
+        self.assertEqual(list_response.data['results'], [])

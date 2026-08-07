@@ -1,7 +1,7 @@
 <script setup>
 import { computed, provide, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, Connection, SetUp, User } from '@element-plus/icons-vue'
+import { ArrowLeft, Connection, DocumentChecked, SetUp, User } from '@element-plus/icons-vue'
 
 import { getProject } from '../api/projects'
 import { projectWorkspaceKey } from '../composables/projectWorkspace'
@@ -99,6 +99,13 @@ watch(
           >
             <el-icon><SetUp /></el-icon>
             环境管理
+          </RouterLink>
+          <RouterLink
+            class="project-navigation__item"
+            :to="{ name: 'project-testcases', params: { projectId: workspace.project.id } }"
+          >
+            <el-icon><DocumentChecked /></el-icon>
+            测试用例
           </RouterLink>
         </nav>
 

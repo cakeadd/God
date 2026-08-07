@@ -1,11 +1,14 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from projects.models import Project
 from projects.permissions import can_edit_project_resource
+from God.pagination import StandardPageNumberPagination
 from .serializers import TestCaseSerializer
 
 
@@ -25,14 +28,46 @@ class TestCaseListCreateView(APIView):
 
         test_cases=project.test_cases.filter(
             is_active=True,
-        )
+        ).select_related('endpoint','environment','created_by')
+
+        search=request.query_params.get('search','').strip()
+        endpoint_id=request.query_params.get('endpoint','').strip()
+        environment_id=request.query_params.get('environment','').strip()
+
+        if search:
+            test_cases=test_cases.filter(
+                Q(name__icontains=search)
+                | Q(endpoint__name__icontains=search)
+                | Q(endpoint__path__icontains=search)
+            )
+
+        if endpoint_id:
+            if not endpoint_id.isdigit() or not project.api_endpoints.filter(
+                pk=endpoint_id,
+                is_active=True,
+            ).exists():
+                raise ValidationError({'endpoint':'接口不属于当前项目，或接口已停用'})
+            test_cases=test_cases.filter(endpoint_id=endpoint_id)
+
+        if environment_id:
+            if not environment_id.isdigit() or not project.environments.filter(
+                pk=environment_id,
+                is_active=True,
+            ).exists():
+                raise ValidationError({'environment':'环境不属于当前项目，或环境已停用'})
+            test_cases=test_cases.filter(environment_id=environment_id)
+
+        # 过滤完成后再稳定排序和分页，保证快速翻页时记录不会重复或遗漏。
+        test_cases=test_cases.order_by('-updated_at','-id')
+        paginator=StandardPageNumberPagination()
+        page=paginator.paginate_queryset(test_cases,request,view=self)
         serializer=TestCaseSerializer(
-            test_cases,
+            page,
             many=True,
             context={'request':request}
         )
 
-        return Response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self,request,project_id):
         project=self.get_project(request,project_id)
