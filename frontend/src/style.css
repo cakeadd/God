@@ -876,6 +876,79 @@ input {
   flex-shrink: 0;
 }
 
+.execution-surface .el-result {
+  padding: 54px 20px;
+}
+
+.execution-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.execution-toolbar__search {
+  width: 360px;
+}
+
+.execution-table {
+  width: 100%;
+}
+
+.execution-table .el-table__row {
+  cursor: pointer;
+}
+
+.execution-detail__message,
+.execution-detail__json-grid section {
+  margin-top: 18px;
+  border: 1px solid var(--app-border);
+}
+
+.execution-detail__message {
+  padding: 14px 16px;
+}
+
+.execution-detail__message--failure {
+  border-color: #f3c6c6;
+}
+
+.execution-detail__message--error {
+  border-color: #ecc3c3;
+}
+
+.execution-detail h3 {
+  margin: 0 0 10px;
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.execution-detail pre {
+  margin: 0;
+  overflow: auto;
+  color: #40505d;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.execution-detail__json-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.execution-detail__json-grid section {
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.execution-detail__response-body {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 880px) {
   .project-workspace__body {
     grid-template-columns: 1fr;

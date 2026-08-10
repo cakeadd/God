@@ -1,4 +1,4 @@
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from kombu.exceptions import OperationalError as BrokerOperationalError
@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from God.pagination import StandardPageNumberPagination
 from projects.models import Project
 from projects.permissions import can_edit_project_resource
 from testcases.models import TestCase
@@ -72,6 +73,14 @@ class TestCaseExecuteView(APIView):
 class TestExecutionListView(APIView):
     permission_classes = [IsAuthenticated]
 
+    status_search_values = {
+        '等待中': TestExecution.Status.PENDING,
+        '执行中': TestExecution.Status.RUNNING,
+        '通过': TestExecution.Status.PASSED,
+        '失败': TestExecution.Status.FAILED,
+        '异常': TestExecution.Status.ERROR,
+    }
+
     def get_project(self,request,project_id):
         return get_object_or_404(
             Project,
@@ -88,15 +97,30 @@ class TestExecutionListView(APIView):
             'environment',
             'executed_by',
         )
+
+        search=request.query_params.get('search','').strip()
+        if search:
+            # 状态使用精确匹配，其余展示字段使用模糊匹配。
+            normalized_status=self.status_search_values.get(
+                search,
+                search.lower(),
+            )
+            executions=executions.filter(
+                Q(status__iexact=normalized_status)
+                | Q(test_case__name__icontains=search)
+                | Q(executed_by__username__icontains=search)
+            )
+
+        # 执行记录会持续累积，必须在序列化前完成服务端分页。
+        paginator=StandardPageNumberPagination()
+        page=paginator.paginate_queryset(executions,request)
         serializer=TestExecutionListSerializer(
-            executions,
+            page,
             many=True,
             context={'request':request}
         )
 
-        return Response(
-            serializer.data
-        )
+        return paginator.get_paginated_response(serializer.data)
 
 
 class TestExecutionDetailView(APIView):

@@ -460,6 +460,44 @@ class TestCaseAPITests(APITestCase):
         self.assertEqual(response.data['query_params']['size'], 20)
         self.assertEqual(response.data['expected_status_code'], 201)
 
+    def test_viewer_cannot_update_testcase(self):
+        test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            name='Viewer Cannot Update',
+            created_by=self.owner,
+        )
+
+        self.auth_as_viewer()
+        response = self.client.patch(
+            self.get_testcase_detail_url(self.project, test_case),
+            {'description': 'Viewer update attempt'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_partial_update_allows_inactive_existing_endpoint(self):
+        test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            name='Inactive Endpoint Case',
+            description='Old description',
+            created_by=self.owner,
+        )
+        self.endpoint.is_active = False
+        self.endpoint.save(update_fields=['is_active'])
+
+        self.auth_as_member()
+        response = self.client.patch(
+            self.get_testcase_detail_url(self.project, test_case),
+            {'description': 'Updated despite inactive endpoint'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['description'], 'Updated despite inactive endpoint')
+
     def test_delete_deactivates_testcase(self):
         test_case = ApiTestCase.objects.create(
             project=self.project,
@@ -485,3 +523,20 @@ class TestCaseAPITests(APITestCase):
 
         self.assertEqual(list_response.data['count'], 0)
         self.assertEqual(list_response.data['results'], [])
+
+    def test_viewer_cannot_deactivate_testcase(self):
+        test_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            name='Viewer Cannot Deactivate',
+            created_by=self.owner,
+        )
+
+        self.auth_as_viewer()
+        response = self.client.delete(
+            self.get_testcase_detail_url(self.project, test_case),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        test_case.refresh_from_db()
+        self.assertTrue(test_case.is_active)

@@ -543,13 +543,14 @@ class TestExecutionAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        execution_ids = [item['id'] for item in response.data]
+        execution_ids = [item['id'] for item in response.data['results']]
         self.assertIn(current_execution.id, execution_ids)
-        self.assertEqual(len(response.data), 1)
-        self.assertNotIn('request_headers', response.data[0])
-        self.assertNotIn('request_body', response.data[0])
-        self.assertNotIn('response_headers', response.data[0])
-        self.assertNotIn('response_body', response.data[0])
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertNotIn('request_headers', response.data['results'][0])
+        self.assertNotIn('request_body', response.data['results'][0])
+        self.assertNotIn('response_headers', response.data['results'][0])
+        self.assertNotIn('response_body', response.data['results'][0])
 
     def test_viewer_can_list_executions(self):
         execution = ApiTestExecution.objects.create(
@@ -566,8 +567,68 @@ class TestExecutionAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], execution.id)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], execution.id)
+
+    def test_execution_list_supports_pagination_and_latest_first(self):
+        executions = [
+            ApiTestExecution.objects.create(
+                project=self.project,
+                test_case=self.test_case,
+                status=ApiTestExecution.Status.PASSED,
+                executed_by=self.owner,
+            )
+            for _ in range(11)
+        ]
+
+        self.auth_as_member()
+        response = self.client.get(
+            self.get_execution_list_url(self.project),
+            {'page': 2, 'page_size': 5},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 11)
+        self.assertEqual(len(response.data['results']), 5)
+        self.assertEqual(response.data['results'][0]['id'], executions[5].id)
+
+    def test_execution_list_searches_status_testcase_and_executor_before_pagination(self):
+        matching_case = ApiTestCase.objects.create(
+            project=self.project,
+            endpoint=self.endpoint,
+            name='Searchable health case',
+            created_by=self.owner,
+        )
+        matching_execution = ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=matching_case,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.member,
+        )
+        ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            status=ApiTestExecution.Status.FAILED,
+            executed_by=self.owner,
+        )
+        ApiTestExecution.objects.create(
+            project=self.other_project,
+            test_case=self.other_test_case,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.owner,
+        )
+
+        self.auth_as_viewer()
+        for search in ('通过', 'passed', 'health', 'member'):
+            with self.subTest(search=search):
+                response = self.client.get(
+                    self.get_execution_list_url(self.project),
+                    {'search': search, 'page_size': 1},
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(response.data['count'], 1)
+                self.assertEqual(response.data['results'][0]['id'], matching_execution.id)
 
     def test_viewer_can_view_execution_detail(self):
         execution = ApiTestExecution.objects.create(

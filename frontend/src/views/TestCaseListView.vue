@@ -1,11 +1,18 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Delete, Edit, Plus, Search, View } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Search, VideoPlay, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { getEndpoints } from '../api/endpoints'
 import { getEnvironments } from '../api/environments'
-import { createTestCase, getTestCase, getTestCases } from '../api/testcases'
+import {
+  createTestCase,
+  deactivateTestCase,
+  getTestCase,
+  getTestCases,
+  updateTestCase,
+} from '../api/testcases'
+import { executeTestCase } from '../api/executions'
 import AppPagination from '../components/AppPagination.vue'
 import { useProjectWorkspace } from '../composables/projectWorkspace'
 
@@ -29,9 +36,19 @@ const createVisible = ref(false)
 const createSaving = ref(false)
 const createFormRef = ref()
 const initialCreateState = ref(null)
+const formMode = ref('create')
+const formLoading = ref(false)
+const editingTestCase = ref(null)
+const legacyStatusAssertions = ref([])
+const deactivatingTestCaseIds = ref(new Set())
+const executingTestCaseIds = ref(new Set())
 
 const editableRoles = ['owner', 'member']
 const canCreate = computed(() => editableRoles.includes(workspace.project?.my_role))
+const canEdit = canCreate
+const formTitle = computed(() => (
+  formMode.value === 'create' ? '新增测试用例' : '编辑测试用例'
+))
 
 const createForm = reactive({
   name: '',
@@ -158,6 +175,50 @@ const hasCreateChanges = computed(() => (
   && JSON.stringify(currentCreateState()) !== JSON.stringify(initialCreateState.value)
 ))
 
+const formEndpointOptions = computed(() => {
+  const current = editingTestCase.value
+  if (
+    formMode.value !== 'edit'
+    || !current
+    || current.endpoint_is_active
+    || endpointOptions.value.some((item) => item.id === current.endpoint)
+  ) {
+    return endpointOptions.value
+  }
+
+  return [
+    ...endpointOptions.value,
+    {
+      id: current.endpoint,
+      name: current.endpoint_name,
+      method: current.endpoint_method,
+      path: current.endpoint_path,
+      isInactive: true,
+    },
+  ]
+})
+
+const formEnvironmentOptions = computed(() => {
+  const current = editingTestCase.value
+  if (
+    formMode.value !== 'edit'
+    || !current?.environment
+    || current.environment_is_active
+    || environmentOptions.value.some((item) => item.id === current.environment)
+  ) {
+    return environmentOptions.value
+  }
+
+  return [
+    ...environmentOptions.value,
+    {
+      id: current.environment,
+      name: current.environment_name,
+      isInactive: true,
+    },
+  ]
+})
+
 function apiErrorMessage(error, fallback) {
   const data = error.response?.data
   if (!data) return fallback
@@ -255,11 +316,61 @@ function resetCreateForm() {
   createFormRef.value?.clearValidate()
 }
 
+function fillForm(testCase) {
+  legacyStatusAssertions.value = (testCase?.assertions || []).filter(
+    (assertion) => assertion.type === 'status_code',
+  )
+  createForm.name = testCase?.name || ''
+  createForm.endpointId = testCase?.endpoint || ''
+  createForm.environmentId = testCase?.environment || ''
+  createForm.description = testCase?.description || ''
+  createForm.headersText = prettyJson(testCase?.headers)
+  createForm.queryParamsText = prettyJson(testCase?.query_params)
+  createForm.bodyText = prettyJson(testCase?.body)
+  createForm.expectedStatusCode = testCase?.expected_status_code ?? 200
+  createForm.assertions = (testCase?.assertions || [])
+    .filter((assertion) => assertion.type === 'json_field_equals')
+    .map((assertion) => {
+      assertionSequence += 1
+      return {
+        id: assertionSequence,
+        path: assertion.path,
+        expectedText: JSON.stringify(assertion.expected),
+      }
+    })
+  createFormRef.value?.clearValidate()
+}
+
 function openCreate() {
   if (!canCreate.value) return
+  formMode.value = 'create'
+  editingTestCase.value = null
+  legacyStatusAssertions.value = []
   resetCreateForm()
   initialCreateState.value = currentCreateState()
   createVisible.value = true
+}
+
+async function openEdit(testCase) {
+  if (!canEdit.value || isDeactivating(testCase.id) || isExecuting(testCase.id)) return
+
+  formMode.value = 'edit'
+  editingTestCase.value = testCase
+  initialCreateState.value = null
+  createVisible.value = true
+  formLoading.value = true
+
+  try {
+    const response = await getTestCase(workspace.project.id, testCase.id)
+    editingTestCase.value = response.data
+    fillForm(response.data)
+    initialCreateState.value = currentCreateState()
+  } catch (error) {
+    createVisible.value = false
+    ElMessage.error(apiErrorMessage(error, '测试用例详情加载失败'))
+  } finally {
+    formLoading.value = false
+  }
 }
 
 function addAssertion() {
@@ -275,16 +386,18 @@ function removeAssertion(index) {
   createForm.assertions.splice(index, 1)
 }
 
-async function confirmDiscardCreate() {
+async function confirmDiscardForm() {
   if (!hasCreateChanges.value) return true
+
+  const isCreate = formMode.value === 'create'
 
   try {
     await ElMessageBox.confirm(
-      '当前测试用例尚未创建，确认放弃吗？',
-      '放弃新增',
+      isCreate ? '当前测试用例尚未创建，确认放弃吗？' : '当前修改尚未保存，确认放弃吗？',
+      isCreate ? '放弃新增' : '放弃修改',
       {
         confirmButtonText: '确认放弃',
-        cancelButtonText: '继续填写',
+        cancelButtonText: isCreate ? '继续填写' : '继续编辑',
         type: 'warning',
       },
     )
@@ -294,16 +407,20 @@ async function confirmDiscardCreate() {
   }
 }
 
-async function handleCreateClose(done) {
-  if (createSaving.value) return
-  if (!(await confirmDiscardCreate())) return
+async function handleFormClose(done) {
+  if (createSaving.value || formLoading.value) return
+  if (!(await confirmDiscardForm())) return
   initialCreateState.value = null
+  editingTestCase.value = null
+  legacyStatusAssertions.value = []
   done()
 }
 
-async function cancelCreate() {
-  if (createSaving.value || !(await confirmDiscardCreate())) return
+async function cancelForm() {
+  if (createSaving.value || !(await confirmDiscardForm())) return
   initialCreateState.value = null
+  editingTestCase.value = null
+  legacyStatusAssertions.value = []
   createVisible.value = false
 }
 
@@ -317,30 +434,148 @@ function buildCreatePayload() {
     query_params: parseJsonObject(createForm.queryParamsText, 'Query 参数覆盖'),
     body: parseJsonObject(createForm.bodyText, '请求体覆盖'),
     expected_status_code: createForm.expectedStatusCode,
-    assertions: createForm.assertions.map((assertion) => ({
-      type: 'json_field_equals',
-      path: assertion.path.trim(),
-      expected: parseAssertionExpected(assertion.expectedText),
-    })),
+    assertions: buildJsonAssertions(),
   }
 }
 
-async function submitCreate() {
+function buildJsonAssertions() {
+  return createForm.assertions.map((assertion) => ({
+      type: 'json_field_equals',
+      path: assertion.path.trim(),
+      expected: parseAssertionExpected(assertion.expectedText),
+    }))
+}
+
+function buildUpdatePayload() {
+  const current = currentCreateState()
+  const initial = initialCreateState.value
+  const payload = {}
+
+  if (current.name !== initial.name) payload.name = current.name.trim()
+  if (current.endpointId !== initial.endpointId) payload.endpoint = current.endpointId
+  if (current.environmentId !== initial.environmentId) {
+    payload.environment = current.environmentId || null
+  }
+  if (current.description !== initial.description) payload.description = current.description.trim()
+  if (current.headersText !== initial.headersText) {
+    payload.headers = parseJsonObject(current.headersText, '请求头覆盖')
+  }
+  if (current.queryParamsText !== initial.queryParamsText) {
+    payload.query_params = parseJsonObject(current.queryParamsText, 'Query 参数覆盖')
+  }
+  if (current.bodyText !== initial.bodyText) {
+    payload.body = parseJsonObject(current.bodyText, '请求体覆盖')
+  }
+  if (current.expectedStatusCode !== initial.expectedStatusCode) {
+    payload.expected_status_code = current.expectedStatusCode
+  }
+  if (JSON.stringify(current.assertions) !== JSON.stringify(initial.assertions)) {
+    payload.assertions = [
+      ...legacyStatusAssertions.value,
+      ...buildJsonAssertions(),
+    ]
+  }
+
+  return payload
+}
+
+async function submitForm() {
   const valid = await createFormRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!valid || (formMode.value === 'edit' && !hasCreateChanges.value)) return
 
   createSaving.value = true
   try {
-    await createTestCase(workspace.project.id, buildCreatePayload())
+    const isCreate = formMode.value === 'create'
+    await (isCreate
+      ? createTestCase(workspace.project.id, buildCreatePayload())
+      : updateTestCase(
+        workspace.project.id,
+        editingTestCase.value.id,
+        buildUpdatePayload(),
+      ))
     initialCreateState.value = null
+    editingTestCase.value = null
+    legacyStatusAssertions.value = []
     createVisible.value = false
-    currentPage.value = 1
+    if (isCreate) currentPage.value = 1
     await loadTestCases()
-    ElMessage.success('测试用例已创建')
+    ElMessage.success(isCreate ? '测试用例已创建' : '测试用例已更新')
   } catch (error) {
-    ElMessage.error(apiErrorMessage(error, '测试用例创建失败，请稍后重试'))
+    ElMessage.error(apiErrorMessage(
+      error,
+      formMode.value === 'create' ? '测试用例创建失败，请稍后重试' : '测试用例保存失败，请稍后重试',
+    ))
   } finally {
     createSaving.value = false
+  }
+}
+
+function isDeactivating(testCaseId) {
+  return deactivatingTestCaseIds.value.has(testCaseId)
+}
+
+async function confirmDeactivate(testCase) {
+  if (!canEdit.value || isDeactivating(testCase.id) || isExecuting(testCase.id)) return
+
+  try {
+    await ElMessageBox.confirm(
+      `停用“${testCase.name}”后，它将从启用列表移除且不能再发起新的单次执行。历史执行记录会保留；尚未执行到它的批量任务会记录“测试用例已停用”错误后继续。`,
+      '停用测试用例',
+      {
+        confirmButtonText: '确认停用',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  deactivatingTestCaseIds.value = new Set([
+    ...deactivatingTestCaseIds.value,
+    testCase.id,
+  ])
+  try {
+    await deactivateTestCase(workspace.project.id, testCase.id)
+    if (testCases.value.length === 1 && currentPage.value > 1) {
+      currentPage.value -= 1
+    }
+    await loadTestCases()
+    ElMessage.success('测试用例已停用')
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, '测试用例停用失败，请稍后重试'))
+  } finally {
+    const nextIds = new Set(deactivatingTestCaseIds.value)
+    nextIds.delete(testCase.id)
+    deactivatingTestCaseIds.value = nextIds
+  }
+}
+
+function isExecuting(testCaseId) {
+  return executingTestCaseIds.value.has(testCaseId)
+}
+
+async function executeCase(testCase) {
+  if (!canEdit.value || isExecuting(testCase.id) || isDeactivating(testCase.id)) return
+
+  executingTestCaseIds.value = new Set([
+    ...executingTestCaseIds.value,
+    testCase.id,
+  ])
+  try {
+    const response = await executeTestCase(workspace.project.id, testCase.id)
+    const statusLabels = {
+      passed: '通过',
+      failed: '失败',
+      error: '异常',
+    }
+    ElMessage.success(`执行完成：${statusLabels[response.data.status] || response.data.status}`)
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, '测试用例执行失败，请稍后重试'))
+  } finally {
+    const nextIds = new Set(executingTestCaseIds.value)
+    nextIds.delete(testCase.id)
+    executingTestCaseIds.value = nextIds
   }
 }
 
@@ -487,23 +722,44 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
         <el-table-column label="更新时间" width="150">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="132" align="center">
+        <el-table-column label="操作" width="164" align="center">
           <template #default="{ row }">
             <div class="table-actions testcase-actions" @click.stop>
+              <el-tooltip content="执行测试用例" placement="top">
+                <el-button
+                  :icon="VideoPlay"
+                  circle
+                  text
+                  type="primary"
+                  :loading="isExecuting(row.id)"
+                  :disabled="!canEdit || isExecuting(row.id) || isDeactivating(row.id)"
+                  aria-label="执行测试用例"
+                  @click="executeCase(row)"
+                />
+              </el-tooltip>
               <el-tooltip content="查看" placement="top">
                 <el-button :icon="View" circle text aria-label="查看测试用例" @click="openTestCase(row)" />
               </el-tooltip>
-              <el-tooltip content="编辑（暂未开放）" placement="top">
-                <el-button :icon="Edit" circle text disabled aria-label="编辑测试用例，暂未开放" />
+              <el-tooltip content="编辑" placement="top">
+                <el-button
+                  :icon="Edit"
+                  circle
+                  text
+                  :disabled="!canEdit || isDeactivating(row.id) || isExecuting(row.id)"
+                  aria-label="编辑测试用例"
+                  @click="openEdit(row)"
+                />
               </el-tooltip>
-              <el-tooltip content="停用（暂未开放）" placement="top">
+              <el-tooltip content="停用" placement="top">
                 <el-button
                   :icon="Delete"
                   circle
                   text
                   type="danger"
-                  disabled
-                  aria-label="停用测试用例，暂未开放"
+                  :loading="isDeactivating(row.id)"
+                  :disabled="!canEdit || isDeactivating(row.id) || isExecuting(row.id)"
+                  aria-label="停用测试用例"
+                  @click="confirmDeactivate(row)"
                 />
               </el-tooltip>
             </div>
@@ -574,14 +830,20 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
 
     <el-dialog
       v-model="createVisible"
-      title="新增测试用例"
+      :title="formTitle"
       width="860px"
       class="testcase-dialog"
       align-center
       destroy-on-close
-      :before-close="handleCreateClose"
+      :before-close="handleFormClose"
     >
-      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-position="top">
+      <el-form
+        ref="createFormRef"
+        v-loading="formLoading"
+        :model="createForm"
+        :rules="createRules"
+        label-position="top"
+      >
         <section class="testcase-form__section">
           <h3>基本信息</h3>
           <div class="testcase-form__grid">
@@ -601,12 +863,12 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
                 v-model="createForm.endpointId"
                 filterable
                 :loading="filterLoading"
-                placeholder="请选择启用接口"
+                placeholder="请选择关联接口"
               >
                 <el-option
-                  v-for="endpoint in endpointOptions"
+                  v-for="endpoint in formEndpointOptions"
                   :key="endpoint.id"
-                  :label="`${endpoint.method} ${endpoint.name} · ${endpoint.path}`"
+                  :label="`${endpoint.isInactive ? '[已停用] ' : ''}${endpoint.method} ${endpoint.name} · ${endpoint.path}`"
                   :value="endpoint.id"
                 />
               </el-select>
@@ -620,9 +882,9 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
               >
                 <el-option label="跟随默认环境" value="" />
                 <el-option
-                  v-for="environment in environmentOptions"
+                  v-for="environment in formEnvironmentOptions"
                   :key="environment.id"
-                  :label="environment.name"
+                  :label="`${environment.isInactive ? '[已停用] ' : ''}${environment.name}`"
                   :value="environment.id"
                 />
               </el-select>
@@ -716,9 +978,14 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
 
       <template #footer>
         <div class="dialog-actions">
-          <el-button :disabled="createSaving" @click="cancelCreate">取消</el-button>
-          <el-button type="primary" :loading="createSaving" @click="submitCreate">
-            创建测试用例
+          <el-button :disabled="createSaving || formLoading" @click="cancelForm">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="createSaving"
+            :disabled="formLoading || (formMode === 'edit' && !hasCreateChanges)"
+            @click="submitForm"
+          >
+            {{ formMode === 'create' ? '创建测试用例' : '保存修改' }}
           </el-button>
         </div>
       </template>
