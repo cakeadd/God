@@ -10,6 +10,7 @@ const EndpointListView = () => import('../views/EndpointListView.vue')
 const ProjectMemberListView = () => import('../views/ProjectMemberListView.vue')
 const EnvironmentListView = () => import('../views/EnvironmentListView.vue')
 const TestCaseListView = () => import('../views/TestCaseListView.vue')
+const TestRunListView = () => import('../views/TestRunListView.vue')
 const ExecutionListView = () => import('../views/ExecutionListView.vue')
 
 const router = createRouter({
@@ -62,6 +63,11 @@ const router = createRouter({
               path: 'testcases',
               name: 'project-testcases',
               component: TestCaseListView,
+            },
+            {
+              path: 'test-runs',
+              name: 'project-test-runs',
+              component: TestRunListView,
             },
             {
               path: 'executions',

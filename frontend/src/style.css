@@ -376,14 +376,18 @@ input {
 .endpoint-heading,
 .member-heading,
 .environment-heading,
-.testcase-heading {
+.testcase-heading,
+.execution-heading,
+.test-run-heading {
   align-items: center;
 }
 
 .endpoint-heading h2,
 .member-heading h2,
 .environment-heading h2,
-.testcase-heading h2 {
+.testcase-heading h2,
+.execution-heading h2,
+.test-run-heading h2 {
   margin: 0;
   color: var(--app-text);
   font-size: 20px;
@@ -394,7 +398,9 @@ input {
 .endpoint-heading p,
 .member-heading p,
 .environment-heading p,
-.testcase-heading p {
+.testcase-heading p,
+.execution-heading p,
+.test-run-heading p {
   margin: 6px 0 0;
   color: var(--app-muted);
   font-size: 13px;
@@ -896,6 +902,124 @@ input {
 
 .execution-table .el-table__row {
   cursor: pointer;
+}
+
+.test-run-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.test-run-surface {
+  min-height: 320px;
+}
+
+.test-run-surface .el-result {
+  padding: 54px 20px;
+}
+
+.test-run-table {
+  width: 100%;
+}
+
+.test-run-table .el-table__row,
+.test-run-case-table .el-table__row,
+.test-run-detail-table .el-table__row {
+  cursor: pointer;
+}
+
+.test-run-progress,
+.test-run-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.test-run-progress span,
+.test-run-result span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.test-run-result .el-tag {
+  width: fit-content;
+}
+
+.test-run-create-dialog,
+.test-run-detail-dialog {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.test-run-create-dialog .el-dialog__body,
+.test-run-detail-dialog .el-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.test-run-create-dialog .el-dialog__footer,
+.test-run-detail-dialog .el-dialog__footer {
+  flex-shrink: 0;
+}
+
+.test-run-case-search {
+  width: 360px;
+  margin-bottom: 14px;
+}
+
+.test-run-case-surface {
+  min-height: 360px;
+  border: 1px solid var(--app-border);
+}
+
+.test-run-case-surface .el-result {
+  padding: 70px 20px;
+}
+
+.test-run-case-endpoint {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 8px;
+}
+
+.test-run-case-endpoint span,
+.test-run-case-endpoint code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-run-case-endpoint code {
+  grid-column: 1 / -1;
+  color: #58636d;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.test-run-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.test-run-create-footer > span {
+  color: var(--app-muted);
+  font-size: 13px;
+}
+
+.test-run-detail__error {
+  margin-top: 16px;
+}
+
+.test-run-detail h3 {
+  margin: 20px 0 10px;
+  color: var(--app-text);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .execution-detail__message,

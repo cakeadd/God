@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 
 import { getExecution, getExecutions } from '../api/executions'
 import AppPagination from '../components/AppPagination.vue'
+import ExecutionDetailDialog from '../components/ExecutionDetailDialog.vue'
 import { useProjectWorkspace } from '../composables/projectWorkspace'
 
 const workspace = useProjectWorkspace()
@@ -53,10 +54,6 @@ function formatTime(value) {
 
 function formatDuration(value) {
   return value === null || value === undefined ? '-' : `${value} ms`
-}
-
-function prettyJson(value) {
-  return JSON.stringify(value ?? {}, null, 2)
 }
 
 function apiErrorMessage(error, fallback) {
@@ -173,6 +170,9 @@ onBeforeUnmount(() => clearTimeout(executionSearchTimer))
           </template>
         </el-table-column>
         <el-table-column prop="test_case_name" label="测试用例" min-width="220" />
+        <el-table-column label="来源" width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.test_run_name || '-' }}</template>
+        </el-table-column>
         <el-table-column label="耗时" width="126">
           <template #default="{ row }">{{ formatDuration(row.duration_ms) }}</template>
         </el-table-column>
@@ -208,51 +208,10 @@ onBeforeUnmount(() => clearTimeout(executionSearchTimer))
       />
     </div>
 
-    <el-dialog v-model="detailVisible" title="执行详情" width="860px" align-center>
-      <div v-loading="detailLoading" class="execution-detail">
-        <template v-if="selectedExecution">
-          <el-descriptions :column="2" border>
-            <el-descriptions-item label="执行状态">
-              <el-tag :type="statusTagType(selectedExecution.status)" effect="plain">
-                {{ statusLabels[selectedExecution.status] || selectedExecution.status }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="测试用例">{{ selectedExecution.test_case_name }}</el-descriptions-item>
-            <el-descriptions-item label="运行环境">
-              {{ selectedExecution.environment_name || '跟随默认环境' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="执行人">{{ selectedExecution.executed_by_username }}</el-descriptions-item>
-            <el-descriptions-item label="执行时间">
-              {{ formatTime(selectedExecution.finished_at || selectedExecution.started_at || selectedExecution.created_at) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="耗时">{{ formatDuration(selectedExecution.duration_ms) }}</el-descriptions-item>
-            <el-descriptions-item label="响应状态码">{{ selectedExecution.response_status_code || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="实际请求" :span="2">
-              <code>{{ selectedExecution.request_method || '-' }} {{ selectedExecution.request_url || '' }}</code>
-            </el-descriptions-item>
-          </el-descriptions>
-
-          <section v-if="selectedExecution.failure_message" class="execution-detail__message execution-detail__message--failure">
-            <h3>断言失败原因</h3>
-            <pre>{{ selectedExecution.failure_message }}</pre>
-          </section>
-          <section v-if="selectedExecution.error_message" class="execution-detail__message execution-detail__message--error">
-            <h3>系统错误</h3>
-            <pre>{{ selectedExecution.error_message }}</pre>
-          </section>
-
-          <div class="execution-detail__json-grid">
-            <section><h3>请求头</h3><pre>{{ prettyJson(selectedExecution.request_headers) }}</pre></section>
-            <section><h3>Query 参数</h3><pre>{{ prettyJson(selectedExecution.request_query_params) }}</pre></section>
-            <section><h3>请求体</h3><pre>{{ prettyJson(selectedExecution.request_body) }}</pre></section>
-            <section><h3>响应头</h3><pre>{{ prettyJson(selectedExecution.response_headers) }}</pre></section>
-            <section class="execution-detail__response-body"><h3>响应体</h3><pre>{{ prettyJson(selectedExecution.response_body) }}</pre></section>
-          </div>
-        </template>
-      </div>
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
+    <ExecutionDetailDialog
+      v-model="detailVisible"
+      :loading="detailLoading"
+      :execution="selectedExecution"
+    />
   </section>
 </template>

@@ -25,6 +25,24 @@ from .serializers import (
 from .services import execute_test_case
 from .tasks import execute_test_run_task
 
+
+def _enqueue_test_run(test_run):
+    try:
+        # 批次提交数据库后再发送 ID，Worker 才能稳定读取到记录。
+        execute_test_run_task.delay(test_run.id)
+    except BrokerOperationalError:
+        test_run.status=TestRun.Status.ERROR
+        test_run.error_message='任务提交失败，请检查 Redis 服务'
+        test_run.finished_at=timezone.now()
+        test_run.save(update_fields=[
+            'status',
+            'error_message',
+            'finished_at',
+        ])
+        return False
+    return True
+
+
 class TestCaseExecuteView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -95,6 +113,7 @@ class TestExecutionListView(APIView):
             'project',
             'test_case',
             'environment',
+            'test_run',
             'executed_by',
         )
 
@@ -141,6 +160,7 @@ class TestExecutionDetailView(APIView):
                 'project',
                 'test_case',
                 'environment',
+                'test_run',
                 'executed_by',
             ),
             pk=pk,
@@ -169,13 +189,17 @@ class TestRunListCreateView(APIView):
         test_runs=project.test_runs.select_related(
             'project',
             'executed_by',
-        )
+        ).order_by('-created_at','-id')
+
+        # 批次历史会持续累积，先在服务端分页再序列化。
+        paginator=StandardPageNumberPagination()
+        page=paginator.paginate_queryset(test_runs,request,view=self)
         serializer=TestRunListSerializer(
-            test_runs,
+            page,
             many=True,
             context={'request':request},
         )
-        return Response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self,request,project_id):
         project=self.get_project(request,project_id)
@@ -216,18 +240,93 @@ class TestRunListCreateView(APIView):
             name=input_serializer.validated_data['name'],
         )
 
-        try:
-            # 批次提交数据库后再发送 ID，Worker 才能稳定读取到记录。
-            execute_test_run_task.delay(test_run.id)
-        except BrokerOperationalError:
-            test_run.status=TestRun.Status.ERROR
-            test_run.error_message='任务提交失败，请检查 Redis 服务'
-            test_run.finished_at=timezone.now()
-            test_run.save(update_fields=[
-                'status',
-                'error_message',
-                'finished_at',
-            ])
+        if not _enqueue_test_run(test_run):
+            serializer=TestRunListSerializer(test_run)
+            return Response(
+                serializer.data,
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        serializer=TestRunListSerializer(
+            test_run,
+            context={'request':request},
+        )
+        return Response(
+            serializer.data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class TestRunRerunView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_project(self,request,project_id):
+        return get_object_or_404(
+            Project,
+            id=project_id,
+            memberships__user=request.user,
+            is_archived=False,
+        )
+
+    def post(self,request,project_id,pk):
+        project=self.get_project(request,project_id)
+        if not can_edit_project_resource(project,request.user):
+            return Response(
+                {'detail':'你没有权限再次执行该批次'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        source_test_run=get_object_or_404(
+            project.test_runs,
+            pk=pk,
+        )
+        if source_test_run.status not in [
+            TestRun.Status.COMPLETED,
+            TestRun.Status.ERROR,
+        ]:
+            return Response(
+                {'detail':'只有已完成或异常的历史批次可以再次执行'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        test_cases=list(source_test_run.test_cases.all().order_by('id'))
+        if len(test_cases) != source_test_run.total_count:
+            return Response(
+                {'detail':'历史批次中的部分测试用例已不存在，无法再次执行'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= len(test_cases) <= 20:
+            return Response(
+                {'detail':'历史批次的测试用例数量必须在 1 至 20 条之间'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        inactive_test_cases=[
+            {'id':test_case.id,'name':test_case.name}
+            for test_case in test_cases
+            if not test_case.is_active
+        ]
+        if inactive_test_cases:
+            inactive_names='、'.join(
+                test_case['name']
+                for test_case in inactive_test_cases
+            )
+            return Response(
+                {
+                    'detail':f'历史批次包含已停用的测试用例：{inactive_names}，无法再次执行',
+                    'inactive_test_cases':inactive_test_cases,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 历史批次只作为用例集合模板，新批次拥有独立状态和执行结果。
+        test_run=create_test_run(
+            project=project,
+            user=request.user,
+            test_cases=test_cases,
+            name=source_test_run.name,
+        )
+        if not _enqueue_test_run(test_run):
             serializer=TestRunListSerializer(test_run)
             return Response(
                 serializer.data,
@@ -261,6 +360,7 @@ class TestRunDetailView(APIView):
             'project',
             'test_case',
             'environment',
+            'test_run',
             'executed_by',
         )
         test_run=get_object_or_404(

@@ -7,6 +7,7 @@ class TestExecutionListSerializer(serializers.ModelSerializer):
     project_name=serializers.CharField(source='project.name',read_only=True)
     test_case_name=serializers.CharField(source='test_case.name',read_only=True)
     environment_name=serializers.SerializerMethodField()
+    test_run_name=serializers.SerializerMethodField()
     executed_by_username=serializers.CharField(source='executed_by.username',read_only=True)
 
     class Meta:
@@ -20,6 +21,7 @@ class TestExecutionListSerializer(serializers.ModelSerializer):
             'environment',
             'environment_name',
             'test_run',
+            'test_run_name',
             'status',
             'response_status_code',
             'duration_ms',
@@ -38,11 +40,17 @@ class TestExecutionListSerializer(serializers.ModelSerializer):
             return None
         return obj.environment.name
 
+    def get_test_run_name(self,obj):
+        if not obj.test_run:
+            return None
+        return obj.test_run.name or f'批次 #{obj.test_run_id}'
+
 
 class TestExecutionSerializer(serializers.ModelSerializer):
     project_name=serializers.CharField(source='project.name',read_only=True)
     test_case_name=serializers.CharField(source='test_case.name',read_only=True)
     environment_name=serializers.SerializerMethodField()
+    test_run_name=serializers.SerializerMethodField()
     executed_by_username=serializers.CharField(source='executed_by.username',read_only=True)
 
     class Meta:
@@ -56,6 +64,7 @@ class TestExecutionSerializer(serializers.ModelSerializer):
             'environment',
             'environment_name',
             'test_run',
+            'test_run_name',
             'status',
             'request_method',
             'request_url',
@@ -81,6 +90,7 @@ class TestExecutionSerializer(serializers.ModelSerializer):
             'test_case_name',
             'environment_name',
             'test_run',
+            'test_run_name',
             'status',
             'request_method',
             'request_url',
@@ -104,6 +114,11 @@ class TestExecutionSerializer(serializers.ModelSerializer):
         if not obj.environment:
             return None
         return obj.environment.name
+
+    def get_test_run_name(self,obj):
+        if not obj.test_run:
+            return None
+        return obj.test_run.name or f'批次 #{obj.test_run_id}'
 
 
 class TestRunCreateSerializer(serializers.Serializer):

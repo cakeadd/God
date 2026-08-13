@@ -2,6 +2,7 @@ from django.urls import reverse
 from unittest.mock import Mock, patch
 
 import requests
+from kombu.exceptions import OperationalError as BrokerOperationalError
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -181,6 +182,15 @@ class TestExecutionAPITests(APITestCase):
     def get_test_run_detail_url(self, project, test_run):
         return reverse(
             'test-run-detail',
+            kwargs={
+                'project_id': project.id,
+                'pk': test_run.id,
+            },
+        )
+
+    def get_test_run_rerun_url(self, project, test_run):
+        return reverse(
+            'test-run-rerun',
             kwargs={
                 'project_id': project.id,
                 'pk': test_run.id,
@@ -592,6 +602,44 @@ class TestExecutionAPITests(APITestCase):
         self.assertEqual(len(response.data['results']), 5)
         self.assertEqual(response.data['results'][0]['id'], executions[5].id)
 
+    def test_execution_list_includes_batch_source_name(self):
+        named_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Smoke Test',
+            total_count=1,
+            executed_by=self.owner,
+        )
+        named_run.test_cases.set([self.test_case])
+        batch_execution = ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            test_run=named_run,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.owner,
+        )
+        single_execution = ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.owner,
+        )
+
+        self.auth_as_viewer()
+        response = self.client.get(self.get_execution_list_url(self.project))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        executions_by_id = {
+            item['id']: item
+            for item in response.data['results']
+        }
+        self.assertEqual(
+            executions_by_id[batch_execution.id]['test_run_name'],
+            'Smoke Test',
+        )
+        self.assertIsNone(
+            executions_by_id[single_execution.id]['test_run_name']
+        )
+
     def test_execution_list_searches_status_testcase_and_executor_before_pagination(self):
         matching_case = ApiTestCase.objects.create(
             project=self.project,
@@ -710,6 +758,34 @@ class TestExecutionAPITests(APITestCase):
         )
         mock_delay.assert_called_once_with(test_run.id)
 
+    def test_test_run_list_supports_pagination_and_project_isolation(self):
+        test_runs = [
+            ApiTestRun.objects.create(
+                project=self.project,
+                name=f'Batch {index}',
+                total_count=1,
+                executed_by=self.owner,
+            )
+            for index in range(11)
+        ]
+        ApiTestRun.objects.create(
+            project=self.other_project,
+            name='Other project batch',
+            total_count=1,
+            executed_by=self.owner,
+        )
+
+        self.auth_as_viewer()
+        response = self.client.get(
+            self.get_test_run_list_url(self.project),
+            {'page': 2, 'page_size': 5},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 11)
+        self.assertEqual(len(response.data['results']), 5)
+        self.assertEqual(response.data['results'][0]['id'], test_runs[5].id)
+
     @patch('executions.views.execute_test_run_task.delay')
     def test_viewer_cannot_create_test_run(self, mock_delay):
         self.auth_as_viewer()
@@ -741,6 +817,23 @@ class TestExecutionAPITests(APITestCase):
         mock_delay.assert_not_called()
 
     @patch('executions.views.execute_test_run_task.delay')
+    def test_test_run_requires_between_one_and_twenty_cases(self, mock_delay):
+        self.auth_as_member()
+
+        for test_case_ids in ([], [self.test_case.id] * 21):
+            with self.subTest(test_case_count=len(test_case_ids)):
+                response = self.client.post(
+                    self.get_test_run_list_url(self.project),
+                    {'test_case_ids': test_case_ids},
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn('test_case_ids', response.data)
+
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
     def test_test_run_rejects_case_from_other_project(self, mock_delay):
         self.auth_as_member()
 
@@ -756,6 +849,175 @@ class TestExecutionAPITests(APITestCase):
             [self.other_test_case.id],
         )
         mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_member_can_rerun_completed_test_run(self, mock_delay):
+        source_test_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Regression',
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            completed_count=1,
+            passed_count=1,
+            executed_by=self.owner,
+        )
+        source_test_run.test_cases.set([self.test_case])
+        source_execution = ApiTestExecution.objects.create(
+            project=self.project,
+            test_case=self.test_case,
+            environment=self.environment,
+            test_run=source_test_run,
+            status=ApiTestExecution.Status.PASSED,
+            executed_by=self.owner,
+        )
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_rerun_url(self.project, source_test_run),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        rerun = ApiTestRun.objects.get(pk=response.data['id'])
+        self.assertNotEqual(rerun.id, source_test_run.id)
+        self.assertEqual(rerun.name, source_test_run.name)
+        self.assertEqual(rerun.status, ApiTestRun.Status.PENDING)
+        self.assertEqual(rerun.total_count, 1)
+        self.assertEqual(rerun.executed_by, self.member)
+        self.assertEqual(
+            list(rerun.test_cases.values_list('id',flat=True)),
+            [self.test_case.id],
+        )
+        self.assertEqual(rerun.executions.count(), 0)
+        source_test_run.refresh_from_db()
+        self.assertEqual(source_test_run.status, ApiTestRun.Status.COMPLETED)
+        self.assertEqual(source_test_run.executions.get(), source_execution)
+        mock_delay.assert_called_once_with(rerun.id)
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_viewer_cannot_rerun_test_run(self, mock_delay):
+        source_test_run = ApiTestRun.objects.create(
+            project=self.project,
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            executed_by=self.owner,
+        )
+        source_test_run.test_cases.set([self.test_case])
+        self.auth_as_viewer()
+
+        response = self.client.post(
+            self.get_test_run_rerun_url(self.project, source_test_run),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(ApiTestRun.objects.count(), 1)
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_active_test_run_cannot_be_rerun(self, mock_delay):
+        self.auth_as_member()
+
+        for run_status in [
+            ApiTestRun.Status.PENDING,
+            ApiTestRun.Status.RUNNING,
+        ]:
+            with self.subTest(run_status=run_status):
+                source_test_run = ApiTestRun.objects.create(
+                    project=self.project,
+                    status=run_status,
+                    total_count=1,
+                    executed_by=self.owner,
+                )
+                source_test_run.test_cases.set([self.test_case])
+
+                response = self.client.post(
+                    self.get_test_run_rerun_url(self.project, source_test_run),
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_test_run_with_inactive_case_cannot_be_rerun(self, mock_delay):
+        source_test_run = ApiTestRun.objects.create(
+            project=self.project,
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            executed_by=self.owner,
+        )
+        source_test_run.test_cases.set([self.test_case])
+        self.test_case.is_active = False
+        self.test_case.save(update_fields=['is_active'])
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_rerun_url(self.project, source_test_run),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(self.test_case.name, response.data['detail'])
+        self.assertEqual(
+            response.data['inactive_test_cases'],
+            [{'id':self.test_case.id,'name':self.test_case.name}],
+        )
+        self.assertEqual(ApiTestRun.objects.count(), 1)
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_test_run_rerun_cannot_cross_projects(self, mock_delay):
+        source_test_run = ApiTestRun.objects.create(
+            project=self.other_project,
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            executed_by=self.owner,
+        )
+        source_test_run.test_cases.set([self.other_test_case])
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_rerun_url(self.project, source_test_run),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(ApiTestRun.objects.count(), 1)
+        mock_delay.assert_not_called()
+
+    @patch('executions.views.execute_test_run_task.delay')
+    def test_rerun_marks_only_new_run_error_when_broker_is_unavailable(
+        self,
+        mock_delay,
+    ):
+        mock_delay.side_effect = BrokerOperationalError('Redis unavailable')
+        source_test_run = ApiTestRun.objects.create(
+            project=self.project,
+            name='Broker retry',
+            status=ApiTestRun.Status.COMPLETED,
+            total_count=1,
+            completed_count=1,
+            passed_count=1,
+            executed_by=self.owner,
+        )
+        source_test_run.test_cases.set([self.test_case])
+        self.auth_as_member()
+
+        response = self.client.post(
+            self.get_test_run_rerun_url(self.project, source_test_run),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        rerun = ApiTestRun.objects.exclude(pk=source_test_run.pk).get()
+        self.assertEqual(rerun.status, ApiTestRun.Status.ERROR)
+        self.assertEqual(rerun.error_message, '任务提交失败，请检查 Redis 服务')
+        source_test_run.refresh_from_db()
+        self.assertEqual(source_test_run.status, ApiTestRun.Status.COMPLETED)
+        self.assertEqual(source_test_run.passed_count, 1)
+        mock_delay.assert_called_once_with(rerun.id)
 
     def test_viewer_can_view_test_run_detail(self):
         test_run = ApiTestRun.objects.create(

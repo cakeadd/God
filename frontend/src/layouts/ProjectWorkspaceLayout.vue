@@ -1,7 +1,7 @@
 <script setup>
 import { computed, provide, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, Connection, DocumentChecked, SetUp, Timer, User } from '@element-plus/icons-vue'
+import { ArrowLeft, Connection, DocumentChecked, SetUp, Timer, User, VideoPlay } from '@element-plus/icons-vue'
 
 import { getProject } from '../api/projects'
 import { projectWorkspaceKey } from '../composables/projectWorkspace'
@@ -106,6 +106,13 @@ watch(
           >
             <el-icon><DocumentChecked /></el-icon>
             测试用例
+          </RouterLink>
+          <RouterLink
+            class="project-navigation__item"
+            :to="{ name: 'project-test-runs', params: { projectId: workspace.project.id } }"
+          >
+            <el-icon><VideoPlay /></el-icon>
+            批量执行
           </RouterLink>
           <RouterLink
             class="project-navigation__item"
