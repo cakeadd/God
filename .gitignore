@@ -30,3 +30,9 @@ htmlcov/
 
 # Logs
 *.log
+
+# Local learning and planning notes
+plan.txt
+开发路线规划.md
+项目理解文档.md
+摘要/
