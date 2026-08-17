@@ -24,6 +24,10 @@ export function getTestRun(projectId, testRunId) {
   return http.get(`/projects/${projectId}/test-runs/${testRunId}/`)
 }
 
+export function getTestRunReport(projectId, testRunId) {
+  return http.get(`/projects/${projectId}/test-runs/${testRunId}/report/`)
+}
+
 export function rerunTestRun(projectId, testRunId) {
   return http.post(`/projects/${projectId}/test-runs/${testRunId}/rerun/`)
 }

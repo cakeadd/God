@@ -7,6 +7,7 @@ import {
   createTestRun,
   getExecution,
   getTestRun,
+  getTestRunReport,
   getTestRuns,
   rerunTestRun,
 } from '../api/executions'
@@ -38,6 +39,9 @@ const createForm = reactive({
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const selectedTestRun = ref(null)
+const testRunReport = ref(null)
+const reportLoading = ref(false)
+const reportLoadError = ref(false)
 const executionDetailVisible = ref(false)
 const executionDetailLoading = ref(false)
 const selectedExecution = ref(null)
@@ -46,6 +50,7 @@ const rerunningTestRunIds = ref(new Set())
 let pollingTimer
 let latestListRequestId = 0
 let latestDetailRequestId = 0
+let latestReportRequestId = 0
 let syncingSelection = false
 
 const canCreate = computed(() => ['owner', 'member'].includes(workspace.project?.my_role))
@@ -108,6 +113,11 @@ const executionStatusLabels = {
   failed: '失败',
   error: '异常',
 }
+const reportResultLabels = {
+  incomplete: '统计中',
+  passed: '全部通过',
+  failed: '存在问题',
+}
 
 function isActiveRun(testRun) {
   return ['pending', 'running'].includes(testRun?.status)
@@ -160,6 +170,12 @@ function resultTagType(testRun) {
   return 'success'
 }
 
+function reportResultTagType(report) {
+  if (report.result === 'failed') return 'danger'
+  if (report.result === 'incomplete') return 'warning'
+  return 'success'
+}
+
 function displayRunName(testRun) {
   return testRun.name || `批次 #${testRun.id}`
 }
@@ -167,6 +183,20 @@ function displayRunName(testRun) {
 function progressPercentage(testRun) {
   if (!testRun.total_count) return 0
   return Math.round(testRun.completed_count / testRun.total_count * 100)
+}
+
+function reportSegmentWidth(count, report) {
+  if (!report?.total_count) return '0%'
+  return `${Math.round(count / report.total_count * 10000) / 100}%`
+}
+
+function pendingCount(report) {
+  return Math.max(report.total_count - report.completed_count, 0)
+}
+
+function slowestBarWidth(execution, report) {
+  if (!report?.max_duration_ms || execution.duration_ms === null) return '0%'
+  return `${Math.max(6, Math.round(execution.duration_ms / report.max_duration_ms * 100))}%`
 }
 
 function formatTime(value) {
@@ -244,6 +274,28 @@ async function loadTestRunDetail(testRunId, { silent = false } = {}) {
   }
 }
 
+async function loadTestRunReport(testRunId, { silent = false } = {}) {
+  const requestId = ++latestReportRequestId
+  if (!silent) {
+    reportLoading.value = true
+    reportLoadError.value = false
+  }
+
+  try {
+    const response = await getTestRunReport(workspace.project.id, testRunId)
+    if (requestId !== latestReportRequestId || !detailVisible.value) return
+    testRunReport.value = response.data
+  } catch (error) {
+    if (requestId !== latestReportRequestId || silent) return
+    reportLoadError.value = true
+    ElMessage.error(apiErrorMessage(error, '批次报告加载失败'))
+  } finally {
+    if (!silent && requestId === latestReportRequestId) {
+      reportLoading.value = false
+    }
+  }
+}
+
 function schedulePolling() {
   clearTimeout(pollingTimer)
   const pageHasActiveRun = testRuns.value.some(isActiveRun)
@@ -254,6 +306,7 @@ function schedulePolling() {
     const requests = [loadTestRuns({ silent: true })]
     if (detailVisible.value && selectedTestRun.value?.id) {
       requests.push(loadTestRunDetail(selectedTestRun.value.id, { silent: true }))
+      requests.push(loadTestRunReport(selectedTestRun.value.id, { silent: true }))
     }
     await Promise.all(requests)
     schedulePolling()
@@ -420,8 +473,13 @@ async function openTestRun(testRun) {
     test_cases: [],
     executions: [],
   }
+  testRunReport.value = null
+  reportLoadError.value = false
   detailVisible.value = true
-  await loadTestRunDetail(testRun.id)
+  await Promise.all([
+    loadTestRunDetail(testRun.id),
+    loadTestRunReport(testRun.id),
+  ])
   schedulePolling()
 }
 
@@ -468,7 +526,10 @@ async function handleRerun(testRun) {
 
 function handleDetailClosed() {
   latestDetailRequestId += 1
+  latestReportRequestId += 1
   selectedTestRun.value = null
+  testRunReport.value = null
+  reportLoadError.value = false
   schedulePolling()
 }
 
@@ -489,6 +550,10 @@ async function openExecutionDetail(execution) {
   }
 }
 
+function openReportExecutionDetail(execution) {
+  openExecutionDetail({ id: execution.execution_id })
+}
+
 onMounted(async () => {
   await loadTestRuns()
   schedulePolling()
@@ -497,6 +562,7 @@ onBeforeUnmount(() => {
   clearTimeout(pollingTimer)
   latestListRequestId += 1
   latestDetailRequestId += 1
+  latestReportRequestId += 1
 })
 </script>
 
@@ -726,6 +792,139 @@ onBeforeUnmount(() => {
             :closable="false"
             :title="selectedTestRun.error_message"
           />
+
+          <section class="test-run-report" v-loading="reportLoading">
+            <h3>可视化报告</h3>
+
+            <div v-if="reportLoadError" class="test-run-report__error">
+              <el-alert type="error" :closable="false" title="批次报告暂时无法加载" />
+              <el-button text type="primary" @click="loadTestRunReport(selectedTestRun.id)">重新加载</el-button>
+            </div>
+
+            <template v-else-if="testRunReport">
+              <div class="test-run-report__overview">
+                <div class="test-run-report__completion">
+                  <el-progress
+                    type="circle"
+                    :width="98"
+                    :stroke-width="8"
+                    :percentage="testRunReport.completion_rate"
+                  />
+                  <div>
+                    <h4>批次完成度</h4>
+                    <strong>{{ testRunReport.completed_count }} / {{ testRunReport.total_count }}</strong>
+                    <span>已完成 / 总用例</span>
+                  </div>
+                </div>
+
+                <div class="test-run-report__summary">
+                  <div>
+                    <span>执行结果</span>
+                    <el-tag :type="reportResultTagType(testRunReport)" effect="plain">
+                      {{ reportResultLabels[testRunReport.result] || testRunReport.result }}
+                    </el-tag>
+                  </div>
+                  <div>
+                    <span>未完成</span>
+                    <strong>{{ pendingCount(testRunReport) }}</strong>
+                  </div>
+                  <div>
+                    <span>总耗时</span>
+                    <strong>{{ formatDuration(testRunReport.total_duration_ms) }}</strong>
+                  </div>
+                  <div>
+                    <span>平均耗时</span>
+                    <strong>{{ formatDuration(testRunReport.average_duration_ms) }}</strong>
+                  </div>
+                  <div>
+                    <span>最大耗时</span>
+                    <strong>{{ formatDuration(testRunReport.max_duration_ms) }}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="test-run-report__distribution">
+                <div class="test-run-report__section-heading">
+                  <h4>已完成用例结果</h4>
+                  <span>通过、失败和异常比例以已完成用例为分母</span>
+                </div>
+                <div class="test-run-report__bar" aria-label="测试结果分布">
+                  <span
+                    class="test-run-report__bar-segment test-run-report__bar-segment--passed"
+                    :style="{ width: reportSegmentWidth(testRunReport.passed_count, testRunReport) }"
+                  />
+                  <span
+                    class="test-run-report__bar-segment test-run-report__bar-segment--failed"
+                    :style="{ width: reportSegmentWidth(testRunReport.failed_count, testRunReport) }"
+                  />
+                  <span
+                    class="test-run-report__bar-segment test-run-report__bar-segment--error"
+                    :style="{ width: reportSegmentWidth(testRunReport.error_count, testRunReport) }"
+                  />
+                  <span
+                    class="test-run-report__bar-segment test-run-report__bar-segment--pending"
+                    :style="{ width: reportSegmentWidth(pendingCount(testRunReport), testRunReport) }"
+                  />
+                </div>
+                <div class="test-run-report__legend">
+                  <span class="test-run-report__legend-item test-run-report__legend-item--passed">通过 {{ testRunReport.passed_count }}（{{ testRunReport.pass_rate }}%）</span>
+                  <span class="test-run-report__legend-item test-run-report__legend-item--failed">失败 {{ testRunReport.failed_count }}（{{ testRunReport.failure_rate }}%）</span>
+                  <span class="test-run-report__legend-item test-run-report__legend-item--error">异常 {{ testRunReport.error_count }}（{{ testRunReport.error_rate }}%）</span>
+                  <span class="test-run-report__legend-item test-run-report__legend-item--pending">未完成 {{ pendingCount(testRunReport) }}</span>
+                </div>
+              </div>
+
+              <div class="test-run-report__analysis">
+                <section>
+                  <div class="test-run-report__section-heading">
+                    <h4>最慢用例</h4>
+                    <span>最多展示 5 条</span>
+                  </div>
+                  <div v-if="testRunReport.slowest_executions.length" class="test-run-report__execution-list">
+                    <button
+                      v-for="execution in testRunReport.slowest_executions"
+                      :key="execution.execution_id"
+                      type="button"
+                      class="test-run-report__execution-row"
+                      @click="openReportExecutionDetail(execution)"
+                    >
+                      <span class="test-run-report__execution-name">{{ execution.test_case_name }}</span>
+                      <span class="test-run-report__duration-track">
+                        <i :style="{ width: slowestBarWidth(execution, testRunReport) }" />
+                      </span>
+                      <strong>{{ formatDuration(execution.duration_ms) }}</strong>
+                    </button>
+                  </div>
+                  <p v-else class="test-run-report__empty">暂无可用耗时数据</p>
+                </section>
+
+                <section>
+                  <div class="test-run-report__section-heading">
+                    <h4>问题用例</h4>
+                    <span>失败或异常的用例</span>
+                  </div>
+                  <div v-if="testRunReport.problem_executions.length" class="test-run-report__execution-list">
+                    <button
+                      v-for="execution in testRunReport.problem_executions"
+                      :key="execution.execution_id"
+                      type="button"
+                      class="test-run-report__problem-row"
+                      @click="openReportExecutionDetail(execution)"
+                    >
+                      <el-tag :type="executionStatusTagType(execution.status)" effect="plain">
+                        {{ executionStatusLabels[execution.status] || execution.status }}
+                      </el-tag>
+                      <span>
+                        <strong>{{ execution.test_case_name }}</strong>
+                        <small>{{ execution.failure_message || execution.error_message || '执行结果不符合预期' }}</small>
+                      </span>
+                    </button>
+                  </div>
+                  <p v-else class="test-run-report__empty">本批次没有失败或异常用例</p>
+                </section>
+              </div>
+            </template>
+          </section>
 
           <h3>执行明细</h3>
           <el-table
