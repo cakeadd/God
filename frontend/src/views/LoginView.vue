@@ -29,7 +29,11 @@ async function submit() {
       : '/projects'
     await router.replace(redirect)
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '用户名或密码错误')
+    if (error.response?.status === 401) {
+      ElMessage.error('用户名或密码错误')
+    } else {
+      ElMessage.error('登录失败，请稍后重试')
+    }
   } finally {
     loading.value = false
   }
@@ -70,6 +74,10 @@ async function submit() {
           登录
         </el-button>
       </el-form>
+      <p class="auth-switch">
+        还没有账号？
+        <RouterLink :to="{ name: 'register', query: { redirect: route.query.redirect } }">注册</RouterLink>
+      </p>
     </section>
   </main>
 </template>

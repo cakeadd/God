@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { Plus, RefreshRight, View } from '@element-plus/icons-vue'
+import { Plus, RefreshRight, Search, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import {
@@ -23,6 +23,8 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const loading = ref(false)
 const loadError = ref(false)
+const listSearch = ref('')
+const appliedListSearch = ref('')
 
 const createVisible = ref(false)
 const createLoading = ref(false)
@@ -48,6 +50,7 @@ const selectedExecution = ref(null)
 const rerunningTestRunIds = ref(new Set())
 
 let pollingTimer
+let listSearchTimer
 let latestListRequestId = 0
 let latestDetailRequestId = 0
 let latestReportRequestId = 0
@@ -240,6 +243,7 @@ async function loadTestRuns({ silent = false } = {}) {
     const response = await getTestRuns(workspace.project.id, {
       page: currentPage.value,
       page_size: pageSize.value,
+      search: appliedListSearch.value || undefined,
     })
     if (requestId !== latestListRequestId) return
     testRuns.value = response.data.results
@@ -328,6 +332,18 @@ async function changePageSize(size) {
   pageSize.value = size
   currentPage.value = 1
   await refreshList()
+}
+
+function scheduleListSearch() {
+  clearTimeout(listSearchTimer)
+  listSearchTimer = setTimeout(async () => {
+    const nextSearch = listSearch.value.trim()
+    if (nextSearch === appliedListSearch.value) return
+
+    appliedListSearch.value = nextSearch
+    currentPage.value = 1
+    await refreshList()
+  }, 300)
 }
 
 async function loadAvailableTestCases() {
@@ -560,6 +576,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   clearTimeout(pollingTimer)
+  clearTimeout(listSearchTimer)
   latestListRequestId += 1
   latestDetailRequestId += 1
   latestReportRequestId += 1
@@ -576,6 +593,15 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="test-run-toolbar">
+      <el-input
+        v-model="listSearch"
+        class="test-run-list-search"
+        :prefix-icon="Search"
+        clearable
+        placeholder="搜索批次名称或发起人"
+        aria-label="搜索批次名称或发起人"
+        @input="scheduleListSearch"
+      />
       <el-button type="primary" :icon="Plus" :disabled="!canCreate" @click="openCreate">
         创建批次
       </el-button>

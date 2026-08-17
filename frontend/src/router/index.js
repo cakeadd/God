@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 const AppLayout = () => import('../layouts/AppLayout.vue')
 const ProjectWorkspaceLayout = () => import('../layouts/ProjectWorkspaceLayout.vue')
 const LoginView = () => import('../views/LoginView.vue')
+const RegisterView = () => import('../views/RegisterView.vue')
 const ProjectListView = () => import('../views/ProjectListView.vue')
 const EndpointListView = () => import('../views/EndpointListView.vue')
 const ProjectMemberListView = () => import('../views/ProjectMemberListView.vue')
@@ -20,6 +21,12 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: LoginView,
+      meta: { guestOnly: true },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: RegisterView,
       meta: { guestOnly: true },
     },
     {

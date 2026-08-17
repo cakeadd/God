@@ -189,9 +189,19 @@ class TestRunListCreateView(APIView):
         test_runs=project.test_runs.select_related(
             'project',
             'executed_by',
-        ).order_by('-created_at','-id')
+        )
 
-        # 批次历史会持续累积，先在服务端分页再序列化。
+        search=request.query_params.get('search','').strip()
+        if search:
+            test_runs=test_runs.filter(
+                Q(name__icontains=search)
+                | Q(executed_by__username__icontains=search)
+            )
+
+        # 先搜索、再稳定排序与分页，保证 count 和页码都基于匹配后的批次集合。
+        test_runs=test_runs.order_by('-created_at','-id')
+
+        # 批次历史会持续累积，必须在筛选后、序列化前完成服务端分页。
         paginator=StandardPageNumberPagination()
         page=paginator.paginate_queryset(test_runs,request,view=self)
         serializer=TestRunListSerializer(

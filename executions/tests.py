@@ -786,6 +786,48 @@ class TestExecutionAPITests(APITestCase):
         self.assertEqual(len(response.data['results']), 5)
         self.assertEqual(response.data['results'][0]['id'], test_runs[5].id)
 
+    def test_test_run_list_searches_name_and_executor_before_pagination(self):
+        matching_runs = [
+            ApiTestRun.objects.create(
+                project=self.project,
+                name=f'Release batch {index}',
+                total_count=1,
+                executed_by=self.owner,
+            )
+            for index in range(6)
+        ]
+        executor_match = ApiTestRun.objects.create(
+            project=self.project,
+            name='Nightly batch',
+            total_count=1,
+            executed_by=self.member,
+        )
+        ApiTestRun.objects.create(
+            project=self.other_project,
+            name='Release batch in another project',
+            total_count=1,
+            executed_by=self.member,
+        )
+
+        self.auth_as_viewer()
+        name_response = self.client.get(
+            self.get_test_run_list_url(self.project),
+            {'search': 'release', 'page': 2, 'page_size': 5},
+        )
+        executor_response = self.client.get(
+            self.get_test_run_list_url(self.project),
+            {'search': 'member'},
+        )
+
+        self.assertEqual(name_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(name_response.data['count'], 6)
+        self.assertEqual(len(name_response.data['results']), 1)
+        self.assertEqual(name_response.data['results'][0]['id'], matching_runs[0].id)
+
+        self.assertEqual(executor_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(executor_response.data['count'], 1)
+        self.assertEqual(executor_response.data['results'][0]['id'], executor_match.id)
+
     @patch('executions.views.execute_test_run_task.delay')
     def test_viewer_cannot_create_test_run(self, mock_delay):
         self.auth_as_viewer()

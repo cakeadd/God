@@ -24,6 +24,51 @@ class AuthAPITests(APITestCase):
         self.assertIn('refresh',resp.data)
         self.assertTrue(User.objects.filter(username='tester').exists())
 
+    def test_register_requires_nickname(self):
+        response = self.client.post(
+            reverse('user-register'),
+            {
+                'username': 'tester',
+                'password': 'testpass123',
+                'password_confirm': 'testpass123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('nickname', response.data)
+
+    def test_register_normalizes_blank_phone_to_null(self):
+        response = self.client.post(
+            reverse('user-register'),
+            {
+                'username': 'tester',
+                'nickname': 'Tester',
+                'phone': '',
+                'password': 'testpass123',
+                'password_confirm': 'testpass123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(User.objects.get(username='tester').phone)
+
+    def test_register_rejects_mismatched_passwords(self):
+        response = self.client.post(
+            reverse('user-register'),
+            {
+                'username': 'tester',
+                'nickname': 'Tester',
+                'password': 'testpass123',
+                'password_confirm': 'different123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['password_confirm'][0], '两次输入的密码不一样')
+
 
     def test_login_returns_tokens(self):
         User.objects.create_user(username='tester',password='testpass123')
@@ -139,6 +184,79 @@ class AuthAPITests(APITestCase):
         response = self.client.patch(
             reverse('user-me'),
             {'nickname': 'Anonymous'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_change_password_updates_password(self):
+        user = User.objects.create_user(
+            username='tester',
+            password='testpass123',
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(
+            reverse('user-change-password'),
+            {
+                'old_password': 'testpass123',
+                'new_password': 'newpass123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('newpass123'))
+        self.assertFalse(user.check_password('testpass123'))
+
+    def test_change_password_rejects_wrong_old_password(self):
+        user = User.objects.create_user(
+            username='tester',
+            password='testpass123',
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(
+            reverse('user-change-password'),
+            {
+                'old_password': 'wrongpass123',
+                'new_password': 'newpass123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['old_password'][0], '原密码错误')
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('testpass123'))
+
+    def test_change_password_rejects_same_password(self):
+        user = User.objects.create_user(
+            username='tester',
+            password='testpass123',
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(
+            reverse('user-change-password'),
+            {
+                'old_password': 'testpass123',
+                'new_password': 'testpass123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['new_password'][0], '新密码不能与原密码相同')
+
+    def test_change_password_requires_authentication(self):
+        response = self.client.post(
+            reverse('user-change-password'),
+            {
+                'old_password': 'testpass123',
+                'new_password': 'newpass123',
+            },
             format='json',
         )
 

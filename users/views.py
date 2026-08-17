@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 # from django.contrib.auth import get_user_model
 from rest_framework.permissions import IsAuthenticated,AllowAny
-from .serializers import RegisterSerializer,UserProfileSerializer,UserSerializer
+from .serializers import ChangePasswordSerializer,RegisterSerializer,UserProfileSerializer,UserSerializer
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -39,6 +39,20 @@ class UserMeView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # 改密独立于个人资料 PATCH，避免密码混入普通资料更新请求。
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class RegisterView(APIView):
     authentication_classes = []

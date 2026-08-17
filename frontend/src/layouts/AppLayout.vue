@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, Edit, Operation } from '@element-plus/icons-vue'
+import { ArrowDown, Edit, Lock, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { useAuthStore } from '../stores/auth'
@@ -11,6 +11,9 @@ const router = useRouter()
 const profileDialogVisible = ref(false)
 const profileSaving = ref(false)
 const profileFormRef = ref()
+const passwordDialogVisible = ref(false)
+const passwordSaving = ref(false)
+const passwordFormRef = ref()
 const profileForm = reactive({
   username: '',
   nickname: '',
@@ -21,6 +24,10 @@ const initialProfileForm = ref({
   nickname: '',
   email: '',
   phone: '',
+})
+const passwordForm = reactive({
+  old_password: '',
+  new_password: '',
 })
 
 const avatarText = computed(() => authStore.displayName.slice(0, 1).toUpperCase())
@@ -41,6 +48,15 @@ const profileRules = {
     { max: 20, message: '手机号不能超过 20 个字符', trigger: 'blur' },
   ],
 }
+const passwordRules = {
+  old_password: [
+    { required: true, message: '请输入原密码', trigger: 'blur' },
+  ],
+  new_password: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 8, message: '新密码至少需要 8 个字符', trigger: 'blur' },
+  ],
+}
 
 function fillProfileForm(user) {
   const nickname = user?.nickname || ''
@@ -58,6 +74,13 @@ function fillProfileForm(user) {
 function openProfileDialog() {
   fillProfileForm(authStore.user)
   profileDialogVisible.value = true
+}
+
+function openPasswordDialog() {
+  passwordForm.old_password = ''
+  passwordForm.new_password = ''
+  passwordFormRef.value?.clearValidate()
+  passwordDialogVisible.value = true
 }
 
 function profileErrorMessage(error) {
@@ -112,6 +135,16 @@ function resetProfileDialog() {
   fillProfileForm(null)
 }
 
+function resetPasswordDialog() {
+  passwordForm.old_password = ''
+  passwordForm.new_password = ''
+  passwordFormRef.value?.clearValidate()
+}
+
+function handlePasswordDialogClose(done) {
+  if (!passwordSaving.value) done()
+}
+
 async function submitProfile() {
   const valid = await profileFormRef.value.validate().catch(() => false)
   if (!valid || !hasProfileChanges.value) return
@@ -134,9 +167,41 @@ async function submitProfile() {
   }
 }
 
+function passwordErrorMessage(error) {
+  const data = error.response?.data
+  if (!data) return '密码修改失败，请稍后重试'
+  if (typeof data.detail === 'string') return data.detail
+
+  const firstEntry = Object.values(data)[0]
+  const message = Array.isArray(firstEntry) ? firstEntry[0] : firstEntry
+  return typeof message === 'string' ? message : '密码修改失败，请稍后重试'
+}
+
+async function submitPassword() {
+  if (passwordSaving.value) return
+  const valid = await passwordFormRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  passwordSaving.value = true
+  try {
+    await authStore.changePassword(passwordForm)
+    passwordDialogVisible.value = false
+    ElMessage.success('密码已修改')
+  } catch (error) {
+    ElMessage.error(passwordErrorMessage(error))
+  } finally {
+    passwordSaving.value = false
+  }
+}
+
 function handleCommand(command) {
   if (command === 'profile') {
     openProfileDialog()
+    return
+  }
+
+  if (command === 'password') {
+    openPasswordDialog()
     return
   }
 
@@ -169,6 +234,10 @@ function handleCommand(command) {
             <el-dropdown-item command="profile">
               <el-icon><Edit /></el-icon>
               编辑个人资料
+            </el-dropdown-item>
+            <el-dropdown-item command="password">
+              <el-icon><Lock /></el-icon>
+              修改密码
             </el-dropdown-item>
             <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
           </el-dropdown-menu>
@@ -220,14 +289,6 @@ function handleCommand(command) {
             autocomplete="tel"
           />
         </el-form-item>
-        <el-form-item label="密码">
-          <el-input
-            model-value=""
-            type="password"
-            disabled
-            autocomplete="off"
-          />
-        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -242,6 +303,56 @@ function handleCommand(command) {
             @click="submitProfile"
           >
             保存修改
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="passwordDialogVisible"
+      title="修改密码"
+      width="460px"
+      align-center
+      destroy-on-close
+      :close-on-click-modal="false"
+      :close-on-press-escape="!passwordSaving"
+      :before-close="handlePasswordDialogClose"
+      @closed="resetPasswordDialog"
+    >
+      <el-form
+        ref="passwordFormRef"
+        :model="passwordForm"
+        :rules="passwordRules"
+        label-position="top"
+        @keyup.enter="submitPassword"
+      >
+        <el-form-item label="原密码" prop="old_password">
+          <el-input
+            v-model="passwordForm.old_password"
+            type="password"
+            show-password
+            autocomplete="off"
+            :disabled="passwordSaving"
+          />
+        </el-form-item>
+        <el-form-item label="新密码" prop="new_password">
+          <el-input
+            v-model="passwordForm.new_password"
+            type="password"
+            show-password
+            autocomplete="new-password"
+            :disabled="passwordSaving"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="dialog-actions">
+          <el-button :disabled="passwordSaving" @click="passwordDialogVisible = false">
+            取消
+          </el-button>
+          <el-button type="primary" :loading="passwordSaving" @click="submitPassword">
+            确认修改
           </el-button>
         </div>
       </template>
